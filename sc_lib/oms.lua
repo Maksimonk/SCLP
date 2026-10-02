@@ -224,6 +224,9 @@ return function(SC)
   local function classify_reject(msg)
     local m = (msg or ""):lower()
     -- текст отказа "только пассивной" у брокеров разный: ищем характерные слова
+    -- ваш брокер (02.10.2026): [GW][82] "Заявка Book-or-Cancel не может быть выставлена/переставлена,
+    -- т.к. она приводит к немедленному исполнению."
+    if m:find("%[82%]") or m:find("book%-or%-cancel") then return "boc" end
     if m:find("пассив") or m:find("passive") or m:find("book or cancel") or m:find("boc") or m:find("встречн")
        or m:find("немедленн") or m:find("мейкер") or m:find("maker") then
       return "boc"
