@@ -432,6 +432,26 @@ for _, c in ipairs(SC.C.active(SC.by_sec.BMX6, "real")) do if c.pos ~= 0 then c2
 check(c25 and c25.phase == "STOP", "flatten -> STOP")
 os.remove(OUT .. "/scalp_cmd.txt")
 
+print("TEST 26: hold mode never sells below entry before the session tail (10 min against the trend)")
+fresh(tight_cfg()); flat_book(); SIM.run(1)
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 90 }, { 10003, 30 } })
+SIM.run(0.3)
+SIM.trade("BMX6", -1, 10000, 1)
+SIM.run(0.3)
+local c26
+for _, c in ipairs(SC.C.active(SC.by_sec.BMX6, "real")) do if c.pos ~= 0 then c26 = c end end
+if c26 then c26.tp_px = nil end            -- как после восстановления без второй ноги
+SIM.book("BMX6", { { 9950, 5 }, { 9949, 30 } }, { { 9952, 90 }, { 9953, 30 } })
+local bad = false
+for _ = 1, 600 do
+  SIM.run(1)
+  for _, o in ipairs(SC.O.all_live(SC.by_sec.BMX6, "real")) do
+    if o.cycle == c26 and o.side == "S" and o.px < 10000 then bad = true end
+  end
+  if c26 and c26.realized < 0 then bad = true end
+end
+check(not bad, "no sell order below the 100.00 entry during 10 minutes")
+
 ------------------------------------------------------------------
 print("TEST 13: random market 20 min (LIVE + virtual setups) - invariants")
 local function fuzz(mode, minutes, seed, hold)

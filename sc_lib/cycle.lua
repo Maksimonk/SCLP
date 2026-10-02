@@ -181,6 +181,10 @@ return function(SC)
       c.t_adv = nil
     end
     local phase
+    if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and not c.tp_px and avg then
+      -- цели нет (переворот позиции, восстановление без второй ноги): +MIN_PROFIT от входа, но НЕ в убыток
+      c.tp_px = long and ceil(avg + P.MIN_PROFIT_TICKS - 1e-9) or floor(avg - P.MIN_PROFIT_TICKS + 1e-9)
+    end
     if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and c.tp_px then
       -- выход висит на цели до конца дня (принудительно - только конец окна / лимит дня / flatten)
       local px = c.tp_px
