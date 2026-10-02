@@ -121,6 +121,17 @@ return function(SC)
     return false
   end
 
+  -- порог в тиках инструмента: NAME_TICKS, если задан, иначе NAME_PCT % от текущей цены (не меньше 1 тика)
+  function R.thr(inst, name)
+    local P = inst.P
+    local tk = P[name .. "_TICKS"]
+    if tk then return tk end
+    local pct = P[name .. "_PCT"] or 0
+    local s = inst.sig
+    if not s.valid then return math.huge end
+    return math.max(1, s.mid * pct / 100)
+  end
+
   function R.max_cycles(inst)
     local P = inst.P
     local n = P.MAX_REAL_CYCLES or 0
@@ -144,14 +155,14 @@ return function(SC)
       if m.mid < lo then lo = m.mid end
       if m.mid > hi then hi = m.mid end
     end
-    if hi - lo >= P.MOVE_PAUSE_TICKS then why = string.format("mid moved %.1f ticks in %g s", hi - lo, w) end
+    if hi - lo >= R.thr(inst, "MOVE_PAUSE") then why = string.format("mid moved %.1f ticks in %g s", hi - lo, w) end
     local sw = inst.last_sweep
     if not why and sw and t - sw.t < 0.5 and sw.levels >= P.MOVE_PAUSE_SWEEP_LEVELS then
       why = string.format("sweep %d levels", sw.levels)
     end
     if not why and inst.ref then
       local rm = SC.K.ref_move(inst, t, w)
-      if rm and abs(rm) >= P.MOVE_PAUSE_REF_TICKS then why = string.format("ref moved %.1f ticks", rm) end
+      if rm and abs(rm) >= R.thr(inst, "MOVE_PAUSE_REF") then why = string.format("ref moved %.1f ticks", rm) end
     end
     if why then
       if not inst.move_pause_until or t >= inst.move_pause_until then

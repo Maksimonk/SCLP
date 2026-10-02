@@ -357,19 +357,29 @@ return function(SC)
     local R = inst.ref
     if not R then return end
     R.t_read = t
-    local ok, q = pcall(getQuoteLevel2, R.class, R.sec)
-    if not ok or type(q) ~= "table" then R.valid = false; return end
-    local bids = parse_side(q.bid, q.bid_count, R.tick, true)
-    local asks = parse_side(q.offer, q.offer_count, R.tick, false)
-    if not bids[1] or not asks[1] or bids[1].p >= asks[1].p then R.valid = false; return end
+    local mid
+    if R.source ~= "last" then                     -- середина стакана опорного
+      local ok, q = pcall(getQuoteLevel2, R.class, R.sec)
+      if ok and type(q) == "table" then
+        local bids = parse_side(q.bid, q.bid_count, R.tick, true)
+        local asks = parse_side(q.offer, q.offer_count, R.tick, false)
+        if bids[1] and asks[1] and bids[1].p < asks[1].p then mid = (bids[1].p + asks[1].p) / 2 * R.tick end
+      end
+    end
+    if not mid and getParamEx then                 -- индекс (стакана нет) или пустой стакан: последняя цена
+      local ok, p = pcall(getParamEx, R.class, R.sec, "LAST")
+      if ok and p and tonumber(p.param_type) ~= 0 then mid = U.num(p.param_value) end
+      if mid and mid <= 0 then mid = nil end
+    end
+    if not mid then R.valid = false; return end
     R.valid = true
-    local mid = (bids[1].p + asks[1].p) / 2 * R.tick * (R.mult or 1)   -- в цене инструмента
     local m = R.mids
     if not m[#m] or m[#m].mid ~= mid then m[#m + 1] = { t = t, mid = mid } end
     while #m > 2 and m[2].t < t - 30 do table.remove(m, 1) end
   end
 
-  -- движение опорного за REF_WINDOW_SEC, в тиках инструмента; nil - неизвестно
+  -- движение опорного за REF_WINDOW_SEC в ПРОЦЕНТАХ, пересчитанное в тики инструмента (процент x его цена):
+  -- так годится любая пара - GLDRUBF (руб/г) за GD ($/унция), IMOEXF за индексом IMOEX. nil - неизвестно
   function K.ref_move(inst, t, window)
     local R = inst.ref
     if not R or not R.valid or not R.t_read or t - R.t_read > inst.P.REF_STALE_SEC then return nil end
@@ -391,7 +401,9 @@ return function(SC)
     end
     local d = now - base
     if abs(mx) > abs(d) then d = mx end
-    return d / inst.tick
+    local s = inst.sig
+    if base <= 0 or not s.valid then return nil end
+    return d / base * s.mid                         -- s.mid - цена инструмента в тиках
   end
 
   return K

@@ -74,10 +74,12 @@ function getSecurityInfo(class, sec)
   return { scale = i.scale, min_price_step = i.tick, mat_date = i.mat, code = sec, class_code = class }
 end
 function getParamEx(class, sec, name)
+  if name == "LAST" and SIM.last and SIM.last[sec] then return { param_type = "1", param_value = tostring(SIM.last[sec]) } end
   local i = SIM.info[sec]
   if not i then return { param_type = "0", param_value = "0" } end
   if name == "SEC_PRICE_STEP" then return { param_type = "1", param_value = tostring(i.tick) } end
   if name == "STEPPRICE" then return { param_type = "1", param_value = tostring(i.step) } end
+  if name == "LAST" and SIM.last and SIM.last[sec] then return { param_type = "1", param_value = tostring(SIM.last[sec]) } end
   return { param_type = "0", param_value = "0" }
 end
 

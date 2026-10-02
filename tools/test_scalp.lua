@@ -473,6 +473,32 @@ check(math.abs((a28.ticks or 0) + 55) < 1e-9, "-55 ticks (sold at best bid 99.45
 check((a28.rub or 0) < -55 * 0.8, "taker fee included in rubles: " .. tostring(a28.rub))
 check((SIM.taker_fills or 0) == 0, "no taker fills from passive orders")
 
+print("TEST 29: several instruments; reference in other units (index LAST) measured in percent")
+local cfg29 = base_cfg()
+cfg29.INSTRUMENTS = {
+  { BASE = "BM", REF = { BASE = "BR" }, MAX_POS = 10, SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off" } },
+  { SEC = "IMOEXF", REF = { SEC = "IMOEX", CLASS = "SNDX", SOURCE = "last" }, MAX_POS = 10,
+    SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off" } },
+}
+SC = { dir = DIR, out_dir = OUT, config_override = cfg29 }
+os.remove(OUT .. "/scalp_state.txt")
+SC.clock = function() return SIM.t end
+dofile(DIR .. "/tools/sim_quik.lua")
+dofile(DIR .. "/scalp.lua")
+SIM.add_sec("BMX6", 0.01, 2, 0.8, 20261102); SIM.add_sec("BRX6", 0.01, 2, 8.0, 20261030)
+SIM.add_sec("IMOEXF", 0.5, 1, 0.5, 20991231); SIM.add_sec("IMOEX", 0.01, 2, 0, 0)
+SIM.last = { IMOEX = 2700.00 }
+SIM.book("BMX6", { { 9999, 10 } }, { { 10000, 10 } }); SIM.book("BRX6", { { 9999, 50 } }, { { 10000, 50 } })
+SIM.book("IMOEXF", { { 5400, 10 } }, { { 5401, 10 } })   -- 2700.0 / 2700.5
+SC.init(); SIM.run(5)
+check(#SC.insts == 2 and SC.by_sec.IMOEXF and SC.by_sec.IMOEXF.ref and SC.by_sec.IMOEXF.ref.source == "last", "IMOEXF follows IMOEX by last price")
+SIM.last.IMOEX = 2702.70                                   -- +0.1% индекса
+SIM.run(0.5)
+local rm = SC.K.ref_move(SC.by_sec.IMOEXF, SIM.t)
+check(rm and math.abs(rm - 5.4) < 0.1, "+0.1% of the index = +5.4 ticks of IMOEXF (0.5 pt tick), got " .. tostring(rm))
+check(SC.R.move_paused(SC.by_sec.IMOEXF, SIM.t), "index +0.1% (>0.06%) -> sharp-move pause on IMOEXF")
+check(not SC.R.move_paused(SC.by_sec.BMX6, SIM.t), "BM not affected")
+
 ------------------------------------------------------------------
 print("TEST 13: random market 20 min (LIVE + virtual setups) - invariants")
 local function fuzz(mode, minutes, seed, hold)

@@ -59,7 +59,7 @@ return function(SC)
     local rm = K.ref_move(inst, t)
     if rm == nil then
       if inst.ref and P.REF_REQUIRED then return nope(inst, name, "ref_unknown") end
-    elseif abs(rm) >= P.REF_QUIET_TICKS then return nope(inst, name, "ref_moving") end
+    elseif abs(rm) >= SC.R.thr(inst, "REF_QUIET") then return nope(inst, name, "ref_moving") end
     local bid, ask = pair_prices(inst)
     if not bid then return nope(inst, name, "no_room") end
     local q = P.QUOTE_SIZE
@@ -96,7 +96,7 @@ return function(SC)
     local sw = inst.last_sweep
     if sw and sw.t > c.t0 then return "sweep" end
     local rm = K.ref_move(inst, t)
-    if rm and abs(rm) >= P.REF_CANCEL_TICKS then return "ref" end
+    if rm and abs(rm) >= SC.R.thr(inst, "REF_CANCEL") then return "ref" end
     if K.burst_ratio(inst, t) > P.BURST_MAX then return "burst" end
     return nil
   end
@@ -114,7 +114,7 @@ return function(SC)
     if S.fade_used[key] then return nil end
     if since_end(inst, name, backend, t) < P.FADE_COOLDOWN_SEC then return nope(inst, name, "cooldown") end
     local rm = K.ref_move(inst, t)
-    if P.FADE_REF_BLOCK and rm and rm * sw.side >= P.REF_QUIET_TICKS then
+    if P.FADE_REF_BLOCK and rm and rm * sw.side >= SC.R.thr(inst, "REF_QUIET") then
       S.fade_used[key] = true
       return nope(inst, name, "ref_confirms")
     end

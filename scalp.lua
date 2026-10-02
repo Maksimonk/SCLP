@@ -120,13 +120,13 @@ local function setup_instruments(user)
           inst.cfg_index = i
           K.new_market(inst)
           if entry.REF then
-            local rsec = entry.REF.SEC or (entry.REF.BASE and resolve(entry.REF.CLASS or class, entry.REF.BASE, 0))
-            local rinfo = rsec and getSecurityInfo(entry.REF.CLASS or class, rsec)
-            if rinfo then
-              local rc = entry.REF.CLASS or class
-              inst.ref = { class = rc, sec = rsec, tick = param(rc, rsec, "SEC_PRICE_STEP") or U.num(rinfo.min_price_step),
-                           mult = entry.REF.mult or 1, mids = {} }
-              if Subscribe_Level_II_Quotes then pcall(Subscribe_Level_II_Quotes, rc, rsec) end
+            local rc = entry.REF.CLASS or class
+            local rsec = entry.REF.SEC or (entry.REF.BASE and resolve(rc, entry.REF.BASE, 0))
+            local rinfo = rsec and getSecurityInfo and getSecurityInfo(rc, rsec)
+            if rinfo or (rsec and entry.REF.SOURCE == "last") then
+              inst.ref = { class = rc, sec = rsec, mids = {}, source = entry.REF.SOURCE or "book",
+                           tick = param(rc, rsec, "SEC_PRICE_STEP") or (rinfo and U.num(rinfo.min_price_step)) or 0.0001 }
+              if inst.ref.source ~= "last" and Subscribe_Level_II_Quotes then pcall(Subscribe_Level_II_Quotes, rc, rsec) end
             else
               U.alert(sec .. ": reference instrument not found")
             end
