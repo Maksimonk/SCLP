@@ -166,10 +166,10 @@ return function(SC)
   ------------------------------------------------------------------
   -- ОКНА
   ------------------------------------------------------------------
-  local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Дырка сейчас",
-                      "Дырок за день (тихих/вынос)", "Позиция реал/вирт", "Циклы и заявки", "Итог реал, руб",
+  local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Спред 3+ сейчас",
+                      "Спредов 3+ за день (снятие/вынос)", "Позиция реал/вирт", "Итог реал, руб",
                       "Открытые, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
-  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 34, 12, 13, 14, 12, 15, 15, 15, 15 }
+  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 12, 13, 14, 12, 15, 15, 15, 15 }
 
   -- нереализованный результат реальных позиций по середине спреда (висящие тейки)
   local function unreal(inst)
@@ -240,38 +240,38 @@ return function(SC)
         s.valid and tostring(s.spread) or "-",
         s.valid and string.format("%+.2f", s.imb1) or "-",
         rm and string.format("%+.1f", rm) or (inst.ref and "нет данных" or "-"),
-        ep and string.format("%s, %.1f с", ep.cause == "sweep" and "вынос" or (ep.cause == "cancel" and "тихая" or "?"), t - ep.t0) or "",
+        ep and string.format("%s, %.1f с", ep.cause == "sweep" and "от выноса" or (ep.cause == "cancel" and "от снятия" or "?"), t - ep.t0) or "",
         string.format("%d / %d", g.cancel or 0, g.sweep or 0),
         string.format("%d / %d", SC.C.position(inst, "real"), SC.C.position(inst, "virtual")),
-        cycles_str(inst), money(pr), money(un), money(pr + un), money(pv),
+        money(pr), money(un), money(pr + un), money(pv),
         reason(inst, "TIGHT"), reason(inst, "PAIR"), reason(inst, "FADE"), reason(inst, "WALL"),
       }
       if inst.skip then inst.skip = {} end
       for col, v in ipairs(vals) do set("main", i, col, v) end
       color("main", i, 2, bg)
       color("main", i, 7, ep and (ep.cause == "cancel" and CL.green or CL.yellow) or nil)
-      color("main", i, 11, nil, sgn_color(pr))
-      color("main", i, 12, nil, sgn_color(un))
-      color("main", i, 13, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
-      color("main", i, 14, nil, sgn_color(pv))
+      color("main", i, 10, nil, sgn_color(pr))
+      color("main", i, 11, nil, sgn_color(un))
+      color("main", i, 12, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
+      color("main", i, 13, nil, sgn_color(pv))
     end
     local st = SC.O.stats
     set("main", n + 1, 1, "ВСЕГО")
     set("main", n + 1, 2, SC.O.halt and "ОСТАНОВЛЕН" or "")
-    set("main", n + 1, 11, money(tot_r))
-    set("main", n + 1, 12, money(tot_u))
-    set("main", n + 1, 13, money(tot_r + tot_u))
-    set("main", n + 1, 14, money(tot_v))
+    set("main", n + 1, 10, money(tot_r))
+    set("main", n + 1, 11, money(tot_u))
+    set("main", n + 1, 12, money(tot_r + tot_u))
+    set("main", n + 1, 13, money(tot_v))
     if T.stats then
       SetWindowCaption(T.stats.id, enc(SC.O.halt and ("ОСТАНОВЛЕН: " .. SC.O.halt) or
         string.format("Сетапы за день | транзакций %d (заявок %d, снятий %d), отказов BoC %d, прочих %d, ошибочных %d",
           st.tx, st.new, st.kill, st.rej_boc, st.rej_other, st.err_tx)))
     end
     color("main", n + 1, 2, SC.O.halt and CL.red or nil)
-    color("main", n + 1, 11, nil, sgn_color(tot_r))
-    color("main", n + 1, 12, nil, sgn_color(tot_u))
-    color("main", n + 1, 13, (tot_r + tot_u) < 0 and CL.red or nil, sgn_color(tot_r + tot_u))
-    color("main", n + 1, 14, nil, sgn_color(tot_v))
+    color("main", n + 1, 10, nil, sgn_color(tot_r))
+    color("main", n + 1, 11, nil, sgn_color(tot_u))
+    color("main", n + 1, 12, (tot_r + tot_u) < 0 and CL.red or nil, sgn_color(tot_r + tot_u))
+    color("main", n + 1, 13, nil, sgn_color(tot_v))
     SetWindowCaption(T.main.id, enc(string.format("Скальпер %s %s | %s | закрыто %s, открытые %s, ИТОГО %s руб | вирт %s | лимит убытка -%s",
       SC.cfg.MODE == "LIVE" and "БОЕВОЙ" or "БУМАГА", SC.cfg.ACCOUNT, window_text(t),
       money(SC.R.pnl.real), money(tot_u), money((SC.R.pnl.real or 0) + tot_u), money(SC.R.pnl.virtual), tostring(SC.cfg.DAILY_LOSS_LIMIT_RUB))))
