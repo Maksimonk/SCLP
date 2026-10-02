@@ -375,7 +375,7 @@ return function(SC)
       if o and k and not o.key then o.key = k; o.num = tr.order_num; O.by_num[k] = o end
     end
     if not o or o.backend ~= "real" then return end
-    O.trades_seen[tn] = true
+    O.trades_seen[tn] = t
     local q = U.num(tr.qty) or 0
     local px = U.round(U.num(tr.price) / o.inst.tick)
     O.fill(o, q, px, t)
@@ -418,8 +418,34 @@ return function(SC)
   ------------------------------------------------------------------
   -- ТАКТ: очередь, повторы снятия, потерянные заявки
   ------------------------------------------------------------------
+  ------------------------------------------------------------------
+  -- ЧИСТКА ПАМЯТИ: завершённые заявки держат ссылки на свои циклы (с историей сделок). Без чистки индексы
+  -- by_tid / by_num / kill_tid / trades_seen росли весь день вместе со всеми закрытыми циклами.
+  -- Заявка остаётся в индексах ещё GC_KEEP_SEC после завершения - на случай запоздавших сделок/ответов.
+  ------------------------------------------------------------------
+  local GC_KEEP_SEC, t_gc = 120, 0
+  local function done_old(o, t)
+    return o.state == "done" and t - (o.t_done or t) > GC_KEEP_SEC and O.unsettled(o) == 0 and not O.await[o.id]
+  end
+  function O.gc(t)
+    if t - t_gc < 10 then return end
+    t_gc = t
+    for k, o in pairs(O.by_tid) do if done_old(o, t) then O.by_tid[k] = nil end end
+    for k, o in pairs(O.by_num) do if done_old(o, t) then O.by_num[k] = nil end end
+    for k, o in pairs(O.kill_tid) do
+      if o.state == "done" and t - (o.t_done or t) > GC_KEEP_SEC then O.kill_tid[k] = nil end
+    end
+    for k, ts in pairs(O.trades_seen) do
+      if type(ts) ~= "number" or t - ts > 600 then O.trades_seen[k] = nil end
+    end
+    local n = 0
+    for _ in pairs(O.reject_texts) do n = n + 1 end
+    if n > 200 then O.reject_texts = {} end
+  end
+
   function O.tick(t)
     local cfg = SC.cfg
+    O.gc(t)
     -- таблица заявок говорит "исполнено", а сделок нет 10 с: учитываем по цене заявки (мейкер - своя цена)
     for id, w in pairs(O.await) do
       local u = O.unsettled(w.o)

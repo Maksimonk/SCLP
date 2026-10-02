@@ -135,8 +135,11 @@ return function(SC)
     if t - last_hb >= hb then
       last_hb = t
       local O = SC.O.stats
-      U.log(string.format("HEARTBEAT pnl real %+.0f / virtual %+.0f RUB | tx %d new %d kill %d boc-rej %d other-rej %d err %d%s",
+      local n_idx = 0
+      for _ in pairs(SC.O.by_tid) do n_idx = n_idx + 1 end
+      U.log(string.format("HEARTBEAT pnl real %+.0f / virtual %+.0f RUB | tx %d new %d kill %d boc-rej %d other-rej %d err %d | mem %.0f KB, cycles %d, idx %d%s",
         SC.R.pnl.real or 0, SC.R.pnl.virtual or 0, O.tx, O.new, O.kill, O.rej_boc, O.rej_other, O.err_tx,
+        collectgarbage("count"), #SC.C.list, n_idx,
         SC.O.halt and (" | HALT: " .. SC.O.halt) or ""))
       for _, l in ipairs(ST.summary()) do U.log("  " .. l) end
       for sec, setups in pairs(SC.S.why_not) do

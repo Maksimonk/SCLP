@@ -329,6 +329,14 @@ return function(SC)
   function C.tick_all(t)
     local keep = {}
     for _, c in ipairs(C.list) do
+      -- завершённые и учтённые заявки цикла больше не нужны (иначе при перестановках стопа список рос бы)
+      if #c.orders > 8 then
+        local live = {}
+        for _, o in ipairs(c.orders) do
+          if o.state ~= "done" or SC.O.unsettled(o) > 0 then live[#live + 1] = o end
+        end
+        c.orders = live
+      end
       C.tick(c, t)
       if c.state ~= "DONE" then keep[#keep + 1] = c end
     end

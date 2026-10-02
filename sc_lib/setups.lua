@@ -112,10 +112,11 @@ return function(SC)
     if not sw or not sw.big or t - sw.t > P.FADE_MAX_AGE_SEC then return nil end
     local key = inst.sec .. backend .. sw.t0
     if S.fade_used[key] then return nil end
+    for k, ts in pairs(S.fade_used) do if t - ts > 60 then S.fade_used[k] = nil end end
     if since_end(inst, name, backend, t) < P.FADE_COOLDOWN_SEC then return nope(inst, name, "cooldown") end
     local rm = K.ref_move(inst, t)
     if P.FADE_REF_BLOCK and rm and rm * sw.side >= SC.R.thr(inst, "REF_QUIET") then
-      S.fade_used[key] = true
+      S.fade_used[key] = t
       return nope(inst, name, "ref_confirms")
     end
     local side, px
@@ -124,7 +125,7 @@ return function(SC)
     else                         -- выкуп -> продаём
       side = "S"; px = max(s.ba - P.FADE_INSIDE, s.bb + 1)
     end
-    S.fade_used[key] = true
+    S.fade_used[key] = t
     local dist = U.clamp(U.round(P.FADE_TP_FRAC * sw.levels), P.FADE_TP_MIN, P.FADE_TP_MAX)
     return {
       setup = name, pair = false,
