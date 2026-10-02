@@ -25,13 +25,43 @@ return function(SC)
 
   local next_local = 0
   local seq
-  function O.next_tid()
-    if not seq then
-      local base = SC.cfg.TRANS_ID_BASE or 2000000000
-      seq = base + floor(U.msk_sec()) * 1000
+  -- номер копии скрипта: scalp.lua - 0, scalp_XXX.lua - 1..6 по имени (или INSTANCE в настройках)
+  function O.instance()
+    local n = SC.cfg.INSTANCE
+    if n == nil then
+      n = 0
+      local suf = (SC.name or "scalp"):sub(6)
+      if suf ~= "" then
+        local h = 0
+        for i = 1, #suf do h = h + suf:byte(i) * i end
+        n = h % 6 + 1
+      end
     end
+    return U.clamp(floor(n), 0, 6)
+  end
+  local function tid_base() return (SC.cfg.TRANS_ID_BASE or 2000000000) + O.instance() * 20000000 end
+  function O.next_tid()
+    if not seq then seq = tid_base() + floor(U.msk_sec()) * 200 end
     seq = seq + 1
     return seq
+  end
+  -- TRANS_ID этой копии робота (любого дня/перезапуска)
+  function O.is_own_tid(tid)
+    tid = tonumber(tid)
+    return tid ~= nil and tid > tid_base() and tid < tid_base() + 20000000
+  end
+
+  -- подхватить заявку, найденную в таблице при перезапуске
+  function O.adopt(inst, d, cycle)
+    next_local = next_local + 1
+    local o = { id = next_local, inst = inst, backend = "real", side = d.side, px = d.px, qty = d.qty,
+                filled = d.filled or 0, state = "active", cycle = cycle, role = d.role, t_new = U.now(),
+                t_sent = U.now(), t_active = U.now(), kill_tries = 0, key = d.key, num = d.num, tid = d.tid,
+                adopted = true }
+    O.live[o.id] = o
+    if o.key then O.by_num[o.key] = o end
+    if o.tid then O.by_tid[o.tid] = o end
+    return o
   end
 
   ------------------------------------------------------------------
@@ -422,7 +452,8 @@ return function(SC)
   function O.own_levels(inst)
     local r = { B = {}, S = {} }
     for _, o in pairs(O.live) do
-      if o.inst == inst and o.backend == "real" and o.state == "active" then
+      -- "sent" тоже: стакан QUIK часто показывает заявку раньше, чем приходит ответ на транзакцию
+      if o.inst == inst and o.backend == "real" and (o.state == "active" or o.state == "sent") then
         local rem = o.qty - o.filled
         if rem > 0 then r[o.side][o.px] = (r[o.side][o.px] or 0) + rem end
       end

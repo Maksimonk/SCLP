@@ -163,13 +163,18 @@ return function(SC)
   local logf, log_day = nil, nil
   local function path(name) return (SC.out_dir or SC.dir or ".") .. "/" .. name end
   U.path = path
+  -- имя файла копии робота: scalp_BR.lua пишет scalp_BR_*.log, scalp_BR_state.txt и т.д.
+  function U.fname(base)
+    if SC.name and SC.name ~= "scalp" then return (base:gsub("scalp", SC.name, 1)) end
+    return base
+  end
 
   local function open_log()
     local day = U.date("%Y%m%d")
     if logf and log_day == day then return logf end
     if logf then logf:close() end
     log_day = day
-    logf = io.open(path("scalp_" .. day .. ".log"), "a")
+    logf = io.open(path(U.fname("scalp_" .. day .. ".log")), "a")
     return logf
   end
   local function stamp()
@@ -202,7 +207,7 @@ return function(SC)
     local c = csvs[name]
     if not c or c.day ~= day then
       if c and c.f then c.f:close() end
-      local p = path(name .. "_" .. day .. ".csv")
+      local p = path(U.fname(name) .. "_" .. day .. ".csv")
       local exists = io.open(p, "r")
       if exists then exists:close() end
       local f = io.open(p, "a")

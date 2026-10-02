@@ -180,6 +180,14 @@ return function(SC)
       c.t_adv = nil
     end
     local phase
+    if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and c.tp_px then
+      -- выход висит на цели до конца дня (принудительно - только конец окна / лимит дня / flatten)
+      local px = c.tp_px
+      local bp = best_passive(c)
+      if long and px < bp then px = bp end
+      if (not long) and px > bp then px = bp end
+      return px, "TP"
+    end
     if c.stop_since or c.force_stop or (c.t_adv and t - c.t_adv >= P.STOP_CONFIRM_SEC) or age >= P.MAX_HOLD_SEC then
       phase = "STOP"
       c.stop_since = c.stop_since or t          -- STOP не отменяется, даже если цена вернулась
@@ -261,6 +269,13 @@ return function(SC)
     if unsettled(c) > 0 then return end              -- ждём сделки по уже исполненному
     for _, o in ipairs(live_orders(c)) do return end  -- ждём подтверждения снятия всего лишнего
     if c.exit_rejected_t and t - c.exit_rejected_t < 0.3 then return end   -- отказ выхода = рынок ушёл в нашу сторону
+    -- не встать против своей же заявки другого цикла (кросс-сделка)
+    for _, x in ipairs(SC.O.all_live(inst, c.backend)) do
+      if x.side ~= side then
+        if side == "S" and px <= x.px then px = x.px + 1 end
+        if side == "B" and px >= x.px then px = x.px - 1 end
+      end
+    end
     local o = SC.O.place(inst, c.backend, side, px, qty, c, "exit", t)
     c.orders[#c.orders + 1] = o
     c.exit = o
@@ -292,6 +307,61 @@ return function(SC)
       if c.inst == inst and c.backend == backend then p = p + c.pos end
     end
     return p
+  end
+
+  -- восстановить цикл после перезапуска. saved - из scalp_state.txt, rows - таблица заявок по ключу/TRANS_ID
+  function C.restore(inst, sv, rows, t)
+    next_id = next_id + 1
+    local c = { id = next_id, inst = inst, setup = sv.setup, backend = "real", t0 = sv.t0 or t, state = "ENTRY",
+                orders = {}, legs = {}, pos = sv.pos or 0, avg = sv.avg, realized = sv.realized or 0,
+                traded = sv.traded or 0, pair = sv.pair, info = { restored = 1 }, fills = {},
+                t_pos = sv.t_pos, tp_px = sv.tp_px, n_filled_legs = sv.n_filled_legs or 0, entry_side = sv.entry_side }
+    local leg_px = {}
+    for _, d in ipairs(sv.orders or {}) do leg_px[d.side] = d.px end
+    c.tp_fn = function(cc)
+      local other = (cc.entry_side == "B") and "S" or "B"
+      return leg_px[other] or cc.tp_px
+    end
+    local adopted, offline = 0, 0
+    for _, d in ipairs(sv.orders or {}) do
+      local row = (d.key and rows.by_key[d.key]) or (d.tid and rows.by_tid[d.tid])
+      if row then
+        rows.used[row] = true
+        local exec = (d.qty or 0) - (U.num(row.balance) or 0)
+        local extra = exec - (d.filled or 0)
+        if extra > 0 then                       -- исполнилось, пока робот стоял
+          offline = offline + extra
+          apply_fill(c, d.side, extra, d.px, t)
+          c.fills[#c.fills + 1] = { t = t, side = d.side, q = extra, px = d.px, role = d.role }
+          if d.role == "entry" and not c.entry_side then c.entry_side = d.side end
+        end
+        if U.bit(row.flags, 0) and exec < (d.qty or 0) then
+          local o = SC.O.adopt(inst, { side = d.side, px = d.px, qty = d.qty, filled = exec, key = d.key,
+            num = row.order_num, tid = d.tid, role = d.role }, c)
+          c.orders[#c.orders + 1] = o
+          if d.role == "entry" then c.legs[#c.legs + 1] = o end
+          adopted = adopted + 1
+        end
+      end
+    end
+    if c.pos ~= 0 then
+      c.state = "POS"
+      c.t_pos = c.t_pos or t
+      if not c.tp_px then c.tp_px = c.tp_fn(c) end
+      for _, o in ipairs(live_orders(c)) do
+        if o.side == exit_side(c) and not c.exit then c.exit = o; o.role = "exit"; c.t_exit = t end
+      end
+    elseif c.state == "ENTRY" and #live_orders(c) == 0 then
+      c.state = "DONE"
+      c.t_done = t
+      if c.traded > 0 then SC.ST.on_done(c); SC.R.on_cycle_done(c, t) end
+      U.log(string.format("[%s] restored %s cycle finished while offline: %+.1f ticks", inst.sec, c.setup, c.realized))
+      return nil
+    end
+    C.list[#C.list + 1] = c
+    U.log(string.format("[%s] RESTORED %s cycle: pos %d avg %s, orders adopted %d, filled while offline %d",
+      inst.sec, c.setup, c.pos, c.avg and inst:price_str(c.avg) or "-", adopted, offline))
+    return c
   end
 
   -- принять позицию, которую робот не открывал (перезапуск / сверка с брокером): закрывается пассивно

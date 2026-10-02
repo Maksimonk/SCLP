@@ -215,11 +215,72 @@ return function(SC)
   end
 
   ------------------------------------------------------------------
+  -- TIGHT: пара у самого рынка (дырка 0, 1 или 2 тика), захват 1 тик
+  ------------------------------------------------------------------
+  -- цены пары по чистому стакану; nil, причина - если правило не выполнено
+  function S.tight_prices(inst)
+    local P, s, nb = inst.P, inst.sig, inst.net
+    local hole = s.spread - 1
+    if hole == 2 then
+      if not P.TIGHT_HOLE2 then return nil, "hole2_off" end
+      return s.bb + 1, s.ba - 1, "hole2"
+    elseif hole == 1 then
+      local big, small = max(s.bq, s.aq), min(s.bq, s.aq)
+      if small <= 0 or big / small < P.TIGHT_HOLE1_RATIO then return nil, "hole1_volumes" end
+      if s.aq > s.bq then
+        return s.bb, s.bb + 1, "hole1_ask_wall"     -- продажа в дырку перед большим аском, покупка в очередь
+      else
+        return s.ba - 1, s.ba, "hole1_bid_wall"     -- покупка в дырку перед большим бидом, продажа в очередь
+      end
+    elseif hole == 0 then
+      local a2, b2 = nb.asks[2], nb.bids[2]
+      if not a2 or not b2 or a2.p ~= s.ba + 1 or b2.p ~= s.bb - 1 then return nil, "hole0_no_wall" end
+      if a2.q < P.TIGHT_HOLE0_K * s.aq or b2.q < P.TIGHT_HOLE0_K * s.bq then return nil, "hole0_volumes" end
+      return s.bb, s.ba, "hole0_walls"
+    end
+    return nil, nil                                  -- дырка 3+ - это PAIR
+  end
+
+  function S.tight_propose(inst, backend, t)
+    local P, s = inst.P, inst.sig
+    local name = "TIGHT"
+    if s.spread > 3 then return nil end
+    if SC.R.move_paused(inst, t) then return nope(inst, name, "sharp_move") end
+    if since_end(inst, name, backend, t) < P.TIGHT_COOLDOWN_SEC then return nope(inst, name, "cooldown") end
+    local bid, ask, why = S.tight_prices(inst)
+    if not bid then return why and nope(inst, name, why) or nil end
+    local q = P.QUOTE_SIZE
+    return {
+      setup = name, pair = true,
+      legs = { { side = "B", px = bid, qty = q }, { side = "S", px = ask, qty = q } },
+      tp = function(c)
+        for _, o in ipairs(c.legs) do
+          if o.side ~= c.entry_side then return o.px end
+        end
+      end,
+      info = { rule = why, spread = s.spread, bq = s.bq, aq = s.aq },
+    }
+  end
+
+  local function tight_check(c, t)
+    local inst, P, s = c.inst, c.inst.P, c.inst.sig
+    if not s.valid then return "nobook" end
+    if SC.R.move_paused(inst, t) then return "sharp_move" end
+    if t - c.t0 < P.TIGHT_MIN_LIFE_SEC then return nil end
+    local bid, ask = S.tight_prices(inst)
+    for _, o in ipairs(SC.C.live_orders(c)) do
+      local want = (o.side == "B") and bid or ask
+      if want ~= o.px then return "book_changed" end
+    end
+    return nil
+  end
+
+  ------------------------------------------------------------------
   -- ОБХОД СЕТАПОВ
   ------------------------------------------------------------------
-  local PROPOSE = { PAIR = S.pair_propose, FADE = S.fade_propose, WALL = S.wall_propose }
-  local CHECK = { PAIR = pair_check, FADE = fade_check, WALL = wall_check }
-  S.ORDER = { "FADE", "PAIR", "WALL" }
+  local PROPOSE = { PAIR = S.pair_propose, TIGHT = S.tight_propose, FADE = S.fade_propose, WALL = S.wall_propose }
+  local CHECK = { PAIR = pair_check, TIGHT = tight_check, FADE = fade_check, WALL = wall_check }
+  S.ORDER = { "FADE", "PAIR", "TIGHT", "WALL" }
 
   function S.entry_check(c, t)
     local f = CHECK[c.setup]

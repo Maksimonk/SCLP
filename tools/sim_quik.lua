@@ -190,6 +190,14 @@ function sendTransaction(t)
   local px = math.floor(tonumber(t[cp("Цена")]) / SIM.info[sec].tick + 0.5)
   local qty = tonumber(t[cp("Количество")])
   SIM.at(SIM.latency, function()
+    -- кросс-сделка со своей же заявкой: биржа отклоняет (код 31, сбор за ошибочную транзакцию)
+    for _, x in ipairs(SIM.resting) do
+      if x.sec == sec and x.active and x.side ~= side and ((side == "B" and px >= x.px) or (side == "S" and px <= x.px)) then
+        SIM.self_cross = (SIM.self_cross or 0) + 1
+        if OnTransReply then OnTransReply({ trans_id = tid, status = 4, order_num = 0, result_msg = cp("(31) Кросс-сделка") }) end
+        return
+      end
+    end
     local opp = best(sec, side == "B" and "S" or "B")
     local cross = opp and ((side == "B" and px >= opp) or (side == "S" and px <= opp))
     if cross and passive then

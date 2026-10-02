@@ -36,7 +36,7 @@ return function(SC)
   ------------------------------------------------------------------
   -- положение окон
   ------------------------------------------------------------------
-  local function ui_path() return U.path("scalp_ui.lua") end
+  local function ui_path() return U.path(U.fname("scalp_ui.lua")) end
   local saved
   local function load_pos()
     if saved then return saved end
@@ -92,9 +92,15 @@ return function(SC)
     ttl = "время вышло", outbid = "встали впереди", undercut = "встали впереди", imb = "дисбаланс", sweep = "вынос",
     ref = "BR двинулся", reject_boc = "отказ: стала бы тейкером", reject_other = "отказ биржи", wall_pulled = "стену сняли",
     approach = "цена подошла медленно", nobook = "нет стакана", ["?"] = "?",
+    sharp_move = "пауза: резкое движение", hole1_volumes = "дырка 1 тик: объёмы различаются < 1.4 раза",
+    hole0_no_wall = "нет дырки: за лучшими ценами пусто", hole0_volumes = "нет дырки: за лучшими ценами нет объёма x3",
+    hole2_off = "дырка 2 тика выключена", book_changed = "стакан изменился - переставляем",
+    max_cycles = "позиция набрана (MAX_POS)", self_cross = "встали бы против своей заявки", cmd_pause = "пауза командой",
+    cmd = "снято командой", requote = "перестановка", add_side = "снята нога набора", extra = "лишняя",
+    partial_rest = "остаток после частичного", stop = "остановка робота",
   }
   local function why(w) return WHY[w] or tostring(w or "") end
-  local SETUP = { PAIR = "пара в дырке", FADE = "ловля выноса", WALL = "у стены", ADOPT = "принятая позиция" }
+  local SETUP = { PAIR = "пара в дырке 3+", TIGHT = "пара у рынка", FADE = "ловля выноса", WALL = "у стены", ADOPT = "принятая позиция" }
   local PHASE = { ENTRY = "заявки", TP = "тейк", DECAY = "тейк↓", HOLD = "+1 тик", BE = "безубыток", STOP = "СТОП",
                   CLOSE = "закрытие", POS = "позиция" }
 
@@ -110,13 +116,16 @@ return function(SC)
     for _, c in ipairs(real) do if c.state ~= "ENTRY" then return "В ПОЗИЦИИ", CL.blue end end
     if #real > 0 then return "ЗАЯВКИ В СТАКАНЕ", CL.green end
     if inst.foreign_block then return "ЧУЖИЕ ЗАЯВКИ", CL.yellow end
+    if SC.flatten then return "ЗАКРЫТИЕ (команда)", CL.yellow end
+    if SC.paused then return "ПАУЗА (команда)", CL.yellow end
+    if SC.R.move_paused(inst, t) then return "ПАУЗА: РЕЗКОЕ ДВИЖЕНИЕ", CL.yellow end
     if SC.cfg.MODE ~= "LIVE" then return "БУМАГА", CL.grey end
     return "ЖДЁТ ДЫРКУ", nil
   end
 
   local function status(inst)
     local parts = {}
-    for _, name in ipairs({ "PAIR", "FADE", "WALL" }) do
+    for _, name in ipairs({ "TIGHT", "PAIR", "FADE", "WALL" }) do
       local mode = (inst.P.SETUPS or {})[name]
       if mode and mode ~= "off" then
         local g = inst.gate and inst.gate[name]
@@ -162,7 +171,7 @@ return function(SC)
     if SC.cfg.SHOW_TABLE == false or not api() or (SC.clock and not SC.ui_test) then return end
     local ok, err = pcall(function()
       local n = #SC.insts
-      make("main", "Скальпер", MAIN_COLS, MAIN_W, n + 1, 10, 10, 1500, 70 + 22 * (n + 1))
+      make("main", SC.name ~= "scalp" and SC.name or "Скальпер", MAIN_COLS, MAIN_W, n + 1, 10, 10, 1500, 70 + 22 * (n + 1))
       if SC.cfg.SHOW_STATS ~= false then
         make("stats", "Скальпер: сетапы (за день)", ST_COLS, ST_W, ST_N, 10, 110 + 22 * (n + 1), 1500, 60 + 22 * ST_N)
       end

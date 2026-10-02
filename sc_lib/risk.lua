@@ -92,14 +92,79 @@ return function(SC)
       if inst.foreign_block then return note(inst, setup, "foreign_orders") end
       local lim = inst.P.INST_LOSS_LIMIT_RUB or 0
       if lim > 0 and (R.inst_pnl[key] or 0) <= -lim then return false, "inst_loss" end
-      local n = #SC.C.active(inst, "real")
-      if n >= inst.P.MAX_REAL_CYCLES then return false, "busy" end
+      if SC.paused then return false, "cmd_pause" end
+      local act = SC.C.active(inst, "real")
+      for _, c in ipairs(act) do
+        if c.state == "ENTRY" then return false, "busy" end          -- в стакане одна пара за раз
+      end
+      if #act >= R.max_cycles(inst) then return false, "max_cycles" end
     else
-      if #SC.C.active(inst, "virtual", setup) > 0 then return false, "busy" end
+      for _, c in ipairs(SC.C.active(inst, "virtual", setup)) do
+        if c.state == "ENTRY" then return false, "busy" end
+      end
+      if #SC.C.active(inst, "virtual", setup) >= R.max_cycles(inst) then return false, "max_cycles" end
     end
     if t < (R.pause_until[key] or 0) then return false, "streak_pause" end
     if t - (R.last_loss[key] or -1e9) < inst.P.LOSS_COOLDOWN_SEC then return false, "loss_cooldown" end
     return true
+  end
+
+  function R.max_cycles(inst)
+    local P = inst.P
+    local n = P.MAX_REAL_CYCLES or 0
+    if n <= 0 then n = math.max(1, math.floor(math.min(P.MAX_POS, SC.cfg.HARD_MAX_POS) / math.max(1, P.QUOTE_SIZE))) end
+    return n
+  end
+
+  ------------------------------------------------------------------
+  -- РЕЗКОЕ ДВИЖЕНИЕ: пауза входов на MOVE_PAUSE_SEC
+  ------------------------------------------------------------------
+  function R.watch_moves(inst, t)
+    local P, s = inst.P, inst.sig
+    if not s.valid then return end
+    local why
+    local w = P.MOVE_PAUSE_WINDOW_SEC
+    local lo, hi = s.mid, s.mid
+    local from = math.max(t - w, inst.move_reset_t or 0)   -- после срабатывания старый ход не считается заново
+    for i = #inst.mids, 1, -1 do
+      local m = inst.mids[i]
+      if m.t < from then break end
+      if m.mid < lo then lo = m.mid end
+      if m.mid > hi then hi = m.mid end
+    end
+    if hi - lo >= P.MOVE_PAUSE_TICKS then why = string.format("mid moved %.1f ticks in %g s", hi - lo, w) end
+    local sw = inst.last_sweep
+    if not why and sw and t - sw.t < 0.5 and sw.levels >= P.MOVE_PAUSE_SWEEP_LEVELS then
+      why = string.format("sweep %d levels", sw.levels)
+    end
+    if not why and inst.ref then
+      local rm = SC.K.ref_move(inst, t, w)
+      if rm and abs(rm) >= P.MOVE_PAUSE_REF_TICKS then why = string.format("ref moved %.1f ticks", rm) end
+    end
+    if why then
+      if not inst.move_pause_until or t >= inst.move_pause_until then
+        U.log(string.format("[%s] SHARP MOVE (%s): entries paused %d s", inst.sec, why, P.MOVE_PAUSE_SEC))
+      end
+      inst.move_pause_until = t + P.MOVE_PAUSE_SEC
+      inst.move_reset_t = t
+    end
+  end
+  function R.move_paused(inst, t) return inst.move_pause_until ~= nil and t < inst.move_pause_until end
+
+  -- дневной лимит с учётом открытых позиций (выходы могут висеть до конца дня)
+  function R.check_open_loss(t)
+    if R.day_stop then return end
+    local un = 0
+    for _, c in ipairs(SC.C.active(nil, "real")) do
+      local s = c.inst.sig
+      if c.pos ~= 0 and c.avg and s.valid then un = un + (s.mid - c.avg) * c.pos * (c.inst.step_price or 0) end
+    end
+    R.unrealized = un
+    if (R.pnl.real or 0) + un <= -SC.cfg.DAILY_LOSS_LIMIT_RUB then
+      R.day_stop = true
+      U.alert(string.format("DAILY LOSS LIMIT incl. open positions: %.0f RUB - closing passively, no new entries",
+        (R.pnl.real or 0) + un))
+    end
   end
 
   -- вписывается ли новый вход в лимиты позиции (худший случай: исполнится всё стоящее)
@@ -114,6 +179,16 @@ return function(SC)
     local maxpos = math.min(P.MAX_POS, SC.cfg.HARD_MAX_POS)
     if pos + b + nb > maxpos or -(pos - s - ns) > maxpos then return false, "max_pos" end
     if backend == "real" and not SC.O.can_send(t, #spec.legs) then return false, "tx_limit" end
+    -- не встать против своей же заявки (кросс-сделка: биржа отклоняет и берёт сбор за ошибку)
+    local min_sell, max_buy
+    for _, o in ipairs(SC.O.all_live(inst, backend)) do
+      if o.side == "S" and (not min_sell or o.px < min_sell) then min_sell = o.px end
+      if o.side == "B" and (not max_buy or o.px > max_buy) then max_buy = o.px end
+    end
+    for _, l in ipairs(spec.legs) do
+      if l.side == "B" and min_sell and l.px >= min_sell then return false, "self_cross" end
+      if l.side == "S" and max_buy and l.px <= max_buy then return false, "self_cross" end
+    end
     return true
   end
 
@@ -122,6 +197,7 @@ return function(SC)
     local ss, flatten = R.session(t)
     if ss == "tail" and flatten then return true end
     if ss == "closed" then return true end
+    if c.backend == "real" and SC.flatten then return true end
     if c.backend == "real" and (R.day_stop or SC.O.halt) then return true end
     if inst.disabled then return true end
     return false

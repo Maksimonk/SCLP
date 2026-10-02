@@ -6,6 +6,15 @@
 
 SC = SC or {}
 SC.dir = SC.dir or (getScriptPath and getScriptPath()) or "."
+-- Имя копии: scalp.lua -> "scalp" (настройки scalp_config.lua); копия scalp_BR.lua -> "scalp_BR"
+-- (настройки scalp_config_BR.lua, свои журналы, состояние и диапазон TRANS_ID). Так можно запустить
+-- несколько копий в QUIK - по одной на инструмент.
+do
+  local src = debug and debug.getinfo and debug.getinfo(1, "S").source or ""
+  local nm = src:match("([^/\\]+)%.lua$") or "scalp"
+  if nm:sub(1, 5) ~= "scalp" then nm = "scalp" end
+  SC.name = SC.name or nm
+end
 SC.running = true
 SC.insts = {}
 
@@ -25,7 +34,8 @@ local FIXED = { MODE = true, ACCOUNT = true, TX = true, TX_ENCODING = true, TRAN
 
 local function read_user_config()
   if SC.config_override then return SC.config_override end
-  local ok, cfg = pcall(dofile, SC.dir .. "/scalp_config.lua")
+  local file = (SC.name == "scalp") and "scalp_config.lua" or ("scalp_config" .. SC.name:sub(6) .. ".lua")
+  local ok, cfg = pcall(dofile, SC.dir .. "/" .. file)
   if not ok or type(cfg) ~= "table" then return nil, tostring(cfg) end
   return cfg
 end
@@ -145,58 +155,105 @@ end
 -- СОСТОЯНИЕ (позиция и заявки - на случай перезапуска)
 ------------------------------------------------------------------
 local state_dirty, state_t = false, 0
-local function state_path() return U.path("scalp_state.txt") end
+local function state_path() return U.path(U.fname("scalp_state.txt")) end
 
+-- сохраняем РЕАЛЬНЫЕ циклы целиком: позиция, цель выхода, живые заявки (чтобы подхватить после перезапуска)
 local function save_state(t, force)
   if not force and (not state_dirty or t - state_t < 1) then return end
   state_dirty, state_t = false, t
-  local parts = { "return { day = '" .. U.date("%Y%m%d", t) .. "', pos = {" }
-  for _, inst in ipairs(SC.insts) do
-    local q = C.position(inst, "real")
-    if q ~= 0 then
-      local cost, n = 0, 0
-      for _, c in ipairs(C.active(inst, "real")) do
-        if c.pos ~= 0 then cost = cost + c.avg * math.abs(c.pos); n = n + math.abs(c.pos) end
+  local L = { "return { day = '" .. U.date("%Y%m%d", t) .. "', cycles = {" }
+  for _, c in ipairs(C.active(nil, "real")) do
+    local os_ = {}
+    for _, o in ipairs(C.live_orders(c)) do
+      if o.key or o.tid then
+        os_[#os_ + 1] = string.format("{ key = %s, tid = %s, side = '%s', px = %d, qty = %d, filled = %d, role = '%s' }",
+          o.key and ("'" .. o.key .. "'") or "nil", o.tid and string.format("%d", o.tid) or "nil",
+          o.side, o.px, o.qty, o.filled, o.role or "entry")
       end
-      parts[#parts + 1] = string.format("['%s'] = { q = %d, avg = %.4f },", inst.sec, q, cost / math.max(1, n))
     end
+    L[#L + 1] = string.format("{ sec = '%s', setup = '%s', pos = %d, avg = %s, tp_px = %s, realized = %.4f, traded = %d, " ..
+      "pair = %s, entry_side = %s, n_filled_legs = %d, orders = { %s } },",
+      c.inst.sec, c.setup, c.pos, c.avg and string.format("%.4f", c.avg) or "nil", c.tp_px and tostring(c.tp_px) or "nil",
+      c.realized, c.traded, tostring(c.pair and true or false), c.entry_side and ("'" .. c.entry_side .. "'") or "nil",
+      c.n_filled_legs or 0, table.concat(os_, ", "))
   end
-  parts[#parts + 1] = "}, orders = {"
-  for _, o in ipairs(O.all_live(nil, "real")) do
-    if o.key then parts[#parts + 1] = string.format("{ sec = '%s', key = '%s' },", o.inst.sec, o.key) end
-  end
-  parts[#parts + 1] = "} }"
-  U.write_file_atomic(state_path(), table.concat(parts, "\n"))
+  L[#L + 1] = "} }"
+  U.write_file_atomic(state_path(), table.concat(L, "\n"))
 end
 function SC.mark_state() state_dirty = true end
 
-local function restore_state(t)
-  local ok, st = pcall(dofile, state_path())
-  if not ok or type(st) ~= "table" or st.day ~= U.date("%Y%m%d", t) then return end
-  if SC.cfg.SHARED_ACCOUNT then
-    for sec, p in pairs(st.pos or {}) do
-      local inst = SC.by_sec[sec]
-      if inst and p.q ~= 0 then C.adopt(inst, p.q, p.avg / inst.tick, t, "restart (scalp_state.txt)") end
+local function orders_rows()
+  local r = { by_key = {}, by_tid = {}, used = {}, list = {} }
+  local n = getNumberOf and getNumberOf("orders") or 0
+  for i = 0, n - 1 do
+    local row = getItem("orders", i)
+    if row and SC.by_sec[row.sec_code] then
+      local k = U.key_from_num(row.order_num)
+      if k then r.by_key[k] = row end
+      local tid = tonumber(row.trans_id)
+      if tid and tid > 0 then r.by_tid[tid] = row end
+      r.list[#r.list + 1] = row
     end
   end
-  if SC.cfg.CANCEL_ON_START and SC.cfg.MODE == "LIVE" then
-    -- снимаем только те, что таблица заявок показывает активными (снятие несуществующей - ошибочная транзакция)
-    local active = {}
-    local n = getNumberOf and getNumberOf("orders") or 0
-    for i = 0, n - 1 do
-      local row = getItem("orders", i)
-      if row and U.bit(row.flags, 0) then
+  return r
+end
+
+local function restore_state(t)
+  local ok, st = pcall(dofile, state_path())
+  local today = ok and type(st) == "table" and st.day == U.date("%Y%m%d", t)
+  local live = SC.cfg.MODE == "LIVE"
+  local rows = live and orders_rows() or { by_key = {}, by_tid = {}, used = {}, list = {} }
+  if today then
+    for _, sv in ipairs(st.cycles or {}) do
+      local inst = SC.by_sec[sv.sec]
+      if inst then
+        if SC.cfg.ADOPT_ORDERS and live then
+          C.restore(inst, sv, rows, t)
+        elseif (sv.pos or 0) ~= 0 and SC.cfg.SHARED_ACCOUNT then
+          C.adopt(inst, sv.pos, sv.avg, t, "restart (scalp_state.txt)")
+        end
+      end
+    end
+  end
+  -- свои активные заявки, которые не удалось подхватить, снимаем (по таблице: снятие несуществующей = ошибка)
+  if live and SC.cfg.CANCEL_ON_START then
+    for _, row in ipairs(rows.list) do
+      if not rows.used[row] and U.bit(row.flags, 0) and O.is_own_tid(row.trans_id) then
+        local inst = SC.by_sec[row.sec_code]
         local k = U.key_from_num(row.order_num)
-        if k then active[k] = true end
+        if inst and k then
+          U.log("cancel own order left from previous run (not adopted): " .. k)
+          pcall(sendTransaction, O.build_kill(inst, k, O.next_tid()))
+        end
       end
     end
-    for _, r in ipairs(st.orders or {}) do
-      local inst = SC.by_sec[r.sec]
-      if inst and active[r.key] then
-        U.log("cancel order left from previous run: " .. r.key)
-        pcall(sendTransaction, O.build_kill(inst, r.key, O.next_tid()))
-      end
-    end
+  end
+  state_dirty = true
+end
+
+------------------------------------------------------------------
+-- КОМАНДЫ: файл scalp_cmd.txt рядом со скриптом (строка = команда), после выполнения очищается
+--   pause   - не открывать новые циклы (выходы работают)      resume - снять паузу и flatten
+--   flatten - закрыть все позиции (пассивно) и не открывать    cancel - снять все входные заявки
+--   show    - открыть окна заново
+------------------------------------------------------------------
+local function read_commands(t)
+  if not SC.cfg.CMD_FILE then return end
+  local p = U.path(U.fname("scalp_cmd.txt"))
+  local txt = U.read_file(p)
+  if not txt or not txt:find("%S") then return end
+  local f = io.open(p, "w"); if f then f:close() end
+  for line in txt:gmatch("[^\r\n]+") do
+    local cmd = U.trim and U.trim(line):lower() or line:lower():gsub("%s", "")
+    cmd = cmd:gsub("%s", "")
+    if cmd == "pause" then SC.paused = true; U.alert("CMD pause: no new entries")
+    elseif cmd == "resume" then SC.paused = false; SC.flatten = false; U.alert("CMD resume")
+    elseif cmd == "flatten" then SC.paused = true; SC.flatten = true; U.alert("CMD flatten: closing positions passively")
+    elseif cmd == "cancel" then
+      for _, c in ipairs(C.active(nil, "real")) do if c.state == "ENTRY" then C.cancel_all(c, t, "cmd") end end
+      U.alert("CMD cancel: entry orders cancelled")
+    elseif cmd == "show" then W.close(); W.open()
+    else U.log("CMD unknown: " .. cmd) end
   end
 end
 
@@ -321,8 +378,8 @@ function SC.init()
   local t = U.now()
   SC.t_start = t
   R.check_day(t)
-  U.log(string.format("=== SCALP start: MODE %s, account %s, passive-only via universal format (%s = %s) ===",
-    SC.cfg.MODE, SC.cfg.ACCOUNT, SC.cfg.TX.COND, SC.cfg.TX.COND_PASSIVE))
+  U.log(string.format("=== " .. SC.name .. " start (TRANS_ID copy %d): MODE %s, account %s, passive-only via universal format (%s = %s) ===",
+    O.instance(), SC.cfg.MODE, SC.cfg.ACCOUNT, SC.cfg.TX.COND, SC.cfg.TX.COND_PASSIVE))
   setup_instruments(user)
   if #SC.insts == 0 then U.alert("no instruments") end
   restore_state(t)
@@ -366,12 +423,13 @@ function SC.step(t)
       if c.state == "ENTRY" then C.cancel_all(c, t, "halt") end
     end
   end
+  for _, inst in ipairs(SC.insts) do R.watch_moves(inst, t) end
   for _, inst in ipairs(SC.insts) do S.scan(inst, t) end
   O.tick(t)
   ST.tick(t)
   W.tick(t)
   if t - t_foreign >= 5 then t_foreign = t; scan_foreign(t) end
-  if t - t_sync >= 1 then t_sync = t; sync_broker(t) end
+  if t - t_sync >= 1 then t_sync = t; sync_broker(t); R.check_open_loss(t); read_commands(t) end
   if t - t_cfg >= 5 then t_cfg = t; reload_config(t) end
   save_state(t)
 end

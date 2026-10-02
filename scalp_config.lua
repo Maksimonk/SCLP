@@ -4,7 +4,7 @@
 -- Цены/расстояния - в шагах цены, деньги - в рублях, время - в секундах.
 -- Счёт, сессии, лимиты и комиссии взяты из forQUIK/mm_config.lua.
 return {
-  MODE = "PAPER",              -- сначала PAPER: виртуальные заявки на живом стакане. Боевой режим - "LIVE"
+  MODE = "LIVE",               -- "LIVE" - боевой; "PAPER" - виртуальные заявки на живом стакане
   ACCOUNT = "SPBFUT17Y1j",     -- торговый счёт FORTS (как в forQUIK)
 
   HARD_MAX_POS = 50,
@@ -20,8 +20,10 @@ return {
   RECORD_MARKET = true,        -- писать стакан и ленту (для исследования дырок на BM)
 
   DEFAULTS = {
-    MAX_POS = 2,
-    QUOTE_SIZE = 1,
+    MAX_POS = 3,               -- ПОТОЛОК ПОЗИЦИИ (лотов, в одну сторону). Выходы висят до конца дня - позиция копится
+                               -- до этого числа, дальше новые пары не ставятся. Впишите своё значение.
+    QUOTE_SIZE = 1,            -- по 1 лоту на каждую ногу пары
+    EXIT_HOLD_EOD = true,      -- тейк висит до конца дня (false - выход по фазам с STOP через 60 с / 6 тиков)
     BROKER_FEE_RUB = 0,        -- комиссия БРОКЕРА за контракт - из тарифа (как в forQUIK)
   },
 
@@ -29,10 +31,13 @@ return {
     -- мини-Brent. Ближайший контракт выбирается сам (BMX6, потом BMZ6...).
     -- Опорный - полный Brent BR: широкий спред BM при стоящем BR - "тихая" дырка, при движущемся - информация.
     { BASE = "BM", REF = { BASE = "BR", mult = 1 },
-      SETUPS = { PAIR = "live", FADE = "paper", WALL = "paper" } },
+      -- TIGHT - пары у рынка (дырка 0/1/2 тика), PAIR - старая логика для дырки 3+ тика
+      SETUPS = { TIGHT = "live", PAIR = "live", FADE = "paper", WALL = "paper" } },
 
     -- ВНИМАНИЕ: если forQUIK (mm.lua) торгует BM на этом же счёте, в LIVE лучше дать скальперу другой контракт
     -- (например BR) или остановить mm.lua: см. README, раздел "Совместная работа с forQUIK".
-    -- { BASE = "BR", SETUPS = { PAIR = "live", FADE = "paper", WALL = "paper" } },
+    -- { BASE = "BR", SETUPS = { TIGHT = "live", PAIR = "live", FADE = "paper", WALL = "paper" } },
+    -- Несколько инструментов можно запустить и отдельными копиями скрипта (по одной на инструмент):
+    -- скопируйте scalp.lua в scalp_BR.lua и scalp_config.lua в scalp_config_BR.lua - см. README.
   },
 }
