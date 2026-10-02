@@ -168,17 +168,34 @@ return function(SC)
   ------------------------------------------------------------------
   local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Спред 3+ сейчас",
                       "Спредов 3+ за день (снятие/вынос)", "Позиция реал/вирт", "Итог реал, руб",
-                      "Открытые, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
-  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 12, 13, 14, 12, 15, 15, 15, 15 }
+                      "Встречные, руб", "Открытые нетто, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
+  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 12, 13, 15, 14, 12, 15, 15, 15, 15 }
 
   -- нереализованный результат реальных позиций по середине спреда (висящие тейки)
+  -- Висящие позиции. Лонги и шорты разных циклов на бирже взаимно закрыты (позиция счёта - нетто), поэтому:
+  --   "Встречные" - результат пар лонг+шорт, уже зафиксированный (по ценам входа, лучшие с лучшими - FIFO по цене);
+  --   "Открытые нетто" - остаток нетто-позиции по середине спреда. Сумма = прежние "Открытые".
   local function unreal(inst)
-    local s, u = inst.sig, 0
-    if not s.valid then return 0 end
+    local s = inst.sig
+    local L, S = {}, {}
     for _, c in ipairs(SC.C.active(inst, "real")) do
-      if c.pos ~= 0 and c.avg then u = u + (s.mid - c.avg) * c.pos * (inst.step_price or 0) end
+      if c.pos ~= 0 and c.avg then
+        for _ = 1, math.abs(c.pos) do
+          if c.pos > 0 then L[#L + 1] = c.avg else S[#S + 1] = c.avg end
+        end
+      end
     end
-    return u
+    table.sort(L); table.sort(S, function(x, y) return x > y end)
+    local k = math.min(#L, #S)
+    local step = inst.step_price or 0
+    local locked = 0
+    for i = 1, k do locked = locked + (S[i] - L[i]) end
+    local open = 0
+    if s.valid then
+      for i = k + 1, #L do open = open + (s.mid - L[i]) end
+      for i = k + 1, #S do open = open + (S[i] - s.mid) end
+    end
+    return open * step, locked * step, #L - #S
   end
   local ST_COLS = { "Инструмент", "Сетап", "Режим", "Поставлено", "Отказ BoC", "Снято", "Исполнено", "Пара: обе ноги",
                     "Приб./убыт.", "Доля приб.", "Итог, тиков", "Итог, руб", "Тиков на цикл", "Фазы выхода",
@@ -223,7 +240,7 @@ return function(SC)
 
   local function update_main(t)
     local n = #SC.insts
-    local tot_r, tot_v, tot_u = 0, 0, 0
+    local tot_r, tot_v, tot_u, tot_l = 0, 0, 0, 0
     for i, inst in ipairs(SC.insts) do
       local s = inst.sig
       local ph, bg = phase(inst, t)
@@ -232,8 +249,10 @@ return function(SC)
       local g = inst.gaps or {}
       local key_r, key_v = inst.sec .. "real", inst.sec .. "virtual"
       local pr, pv = SC.R.inst_pnl[key_r] or 0, SC.R.inst_pnl[key_v] or 0
-      local un = unreal(inst)
+      local op, lk = unreal(inst)
+      local un = op + lk
       tot_r, tot_v, tot_u = tot_r + pr, tot_v + pv, tot_u + un
+      tot_l = tot_l + lk
       local vals = {
         inst.sec, ph,
         s.valid and (inst:price_str(s.bb) .. " / " .. inst:price_str(s.ba)) or "-",
@@ -243,7 +262,7 @@ return function(SC)
         ep and string.format("%s, %.1f с", ep.cause == "sweep" and "от выноса" or (ep.cause == "cancel" and "от снятия" or "?"), t - ep.t0) or "",
         string.format("%d / %d", g.cancel or 0, g.sweep or 0),
         string.format("%d / %d", SC.C.position(inst, "real"), SC.C.position(inst, "virtual")),
-        money(pr), money(un), money(pr + un), money(pv),
+        money(pr), money(lk), money(op), money(pr + un), money(pv),
         reason(inst, "TIGHT"), reason(inst, "PAIR"), reason(inst, "FADE"), reason(inst, "WALL"),
       }
       if inst.skip then inst.skip = {} end
@@ -251,17 +270,19 @@ return function(SC)
       color("main", i, 2, bg)
       color("main", i, 7, ep and (ep.cause == "cancel" and CL.green or CL.yellow) or nil)
       color("main", i, 10, nil, sgn_color(pr))
-      color("main", i, 11, nil, sgn_color(un))
-      color("main", i, 12, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
-      color("main", i, 13, nil, sgn_color(pv))
+      color("main", i, 11, nil, sgn_color(lk))
+      color("main", i, 12, nil, sgn_color(op))
+      color("main", i, 13, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
+      color("main", i, 14, nil, sgn_color(pv))
     end
     local st = SC.O.stats
     set("main", n + 1, 1, "ВСЕГО")
     set("main", n + 1, 2, SC.O.halt and "ОСТАНОВЛЕН" or "")
     set("main", n + 1, 10, money(tot_r))
-    set("main", n + 1, 11, money(tot_u))
-    set("main", n + 1, 12, money(tot_r + tot_u))
-    set("main", n + 1, 13, money(tot_v))
+    set("main", n + 1, 11, money(tot_l))
+    set("main", n + 1, 12, money(tot_u - tot_l))
+    set("main", n + 1, 13, money(tot_r + tot_u))
+    set("main", n + 1, 14, money(tot_v))
     if T.stats then
       SetWindowCaption(T.stats.id, enc(SC.O.halt and ("ОСТАНОВЛЕН: " .. SC.O.halt) or
         string.format("Сетапы за день | транзакций %d (заявок %d, снятий %d), отказов BoC %d, прочих %d, ошибочных %d",
@@ -269,10 +290,11 @@ return function(SC)
     end
     color("main", n + 1, 2, SC.O.halt and CL.red or nil)
     color("main", n + 1, 10, nil, sgn_color(tot_r))
-    color("main", n + 1, 11, nil, sgn_color(tot_u))
-    color("main", n + 1, 12, (tot_r + tot_u) < 0 and CL.red or nil, sgn_color(tot_r + tot_u))
-    color("main", n + 1, 13, nil, sgn_color(tot_v))
-    SetWindowCaption(T.main.id, enc(string.format("Скальпер %s %s | %s | закрыто %s, открытые %s, ИТОГО %s руб | вирт %s | лимит убытка -%s",
+    color("main", n + 1, 11, nil, sgn_color(tot_l))
+    color("main", n + 1, 12, nil, sgn_color(tot_u - tot_l))
+    color("main", n + 1, 13, (tot_r + tot_u) < 0 and CL.red or nil, sgn_color(tot_r + tot_u))
+    color("main", n + 1, 14, nil, sgn_color(tot_v))
+    SetWindowCaption(T.main.id, enc(string.format("Скальпер %s %s | %s | закрыто %s, висящие %s, ИТОГО %s руб | вирт %s | лимит убытка -%s",
       SC.cfg.MODE == "LIVE" and "БОЕВОЙ" or "БУМАГА", SC.cfg.ACCOUNT, window_text(t),
       money(SC.R.pnl.real), money(tot_u), money((SC.R.pnl.real or 0) + tot_u), money(SC.R.pnl.virtual), tostring(SC.cfg.DAILY_LOSS_LIMIT_RUB))))
   end
