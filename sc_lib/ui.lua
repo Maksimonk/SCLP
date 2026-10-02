@@ -185,9 +185,9 @@ return function(SC)
                     "Маркаут 1/5/30 с", "Почему снимали" }
   local ST_W = { 10, 16, 9, 11, 10, 8, 10, 12, 11, 10, 11, 10, 12, 30, 18, 40 }
   local ST_N = 12
-  local TR_COLS = { "Время", "Инструмент", "Сетап", "Реал/вирт", "Направление", "Кол-во", "Цена", "Роль",
-                    "Позиция после", "Итог цикла, тиков", "Итог цикла, руб" }
-  local TR_W = { 12, 10, 16, 10, 12, 7, 10, 9, 12, 15, 14 }
+  local TR_COLS = { "Время", "Инструмент", "Цикл №", "Сетап", "Реал/вирт", "Направление", "Кол-во", "Цена", "Роль",
+                    "Вход цикла", "Позиция цикла", "Итог цикла, тиков", "Итог цикла, руб" }
+  local TR_W = { 12, 10, 8, 16, 10, 12, 7, 10, 9, 11, 12, 15, 14 }
   local TR_N = 15
 
   function W.open()
@@ -318,13 +318,13 @@ return function(SC)
       local f = fl[#fl - i + 1]
       if f then
         local vals = { os.date("%H:%M:%S", floor(f.t)) .. string.format(".%03d", floor((f.t % 1) * 1000)),
-          f.sec, SETUP[f.setup] or f.setup, f.backend == "real" and "реал" or "вирт",
+          f.sec, f.cid and tostring(f.cid) or "", SETUP[f.setup] or f.setup, f.backend == "real" and "реал" or "вирт",
           f.side == "B" and "покупка" or "продажа", tostring(f.q), f.px, f.role == "exit" and "выход" or "вход",
-          tostring(f.pos), f.ticks and string.format("%+.1f", f.ticks) or "", f.net and money(f.net) or "" }
+          f.entry or "", tostring(f.pos), f.ticks and string.format("%+.1f", f.ticks) or "", f.net and money(f.net) or "" }
         for col, v in ipairs(vals) do set("trades", i, col, v) end
-        color("trades", i, 4, f.backend == "real" and CL.green or CL.grey)
-        color("trades", i, 5, nil, f.side == "B" and CL.pos or CL.neg)
-        color("trades", i, 11, nil, f.net and sgn_color(f.net) or nil)
+        color("trades", i, 5, f.backend == "real" and CL.green or CL.grey)
+        color("trades", i, 6, nil, f.side == "B" and CL.pos or CL.neg)
+        color("trades", i, 13, nil, f.net and sgn_color(f.net) or nil)
       end
     end
   end

@@ -106,7 +106,8 @@ return function(SC)
       SC.fills_log = SC.fills_log or {}
       table.insert(SC.fills_log, { t = t, sec = c.inst.sec, side = o.side, q = q, px = c.inst:price_str(px),
         setup = c.setup, backend = c.backend, role = o.role, pos = c.pos + 0,
-        net = (c.pos == 0) and SC.R.cycle_rub(c) or nil, ticks = (c.pos == 0) and c.realized or nil })
+        net = (c.pos == 0) and SC.R.cycle_rub(c) or nil, ticks = (c.pos == 0) and c.realized or nil,
+        cid = c.id, entry = c.fills[1] and c.inst:price_str(c.fills[1].px) or nil })
       if #SC.fills_log > 50 then table.remove(SC.fills_log, 1) end
       SC.fills_seq = (SC.fills_seq or 0) + 1
       if o.role == "entry" and not o.counted_leg then o.counted_leg = true; c.n_filled_legs = c.n_filled_legs + 1 end
