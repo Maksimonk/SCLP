@@ -168,8 +168,18 @@ return function(SC)
   ------------------------------------------------------------------
   local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Дырка сейчас",
                       "Дырок за день (тихих/вынос)", "Позиция реал/вирт", "Циклы и заявки", "Итог реал, руб",
-                      "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
-  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 34, 12, 12, 15, 15, 15, 15 }
+                      "Открытые, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
+  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 34, 12, 13, 14, 12, 15, 15, 15, 15 }
+
+  -- нереализованный результат реальных позиций по середине спреда (висящие тейки)
+  local function unreal(inst)
+    local s, u = inst.sig, 0
+    if not s.valid then return 0 end
+    for _, c in ipairs(SC.C.active(inst, "real")) do
+      if c.pos ~= 0 and c.avg then u = u + (s.mid - c.avg) * c.pos * (inst.step_price or 0) end
+    end
+    return u
+  end
   local ST_COLS = { "Инструмент", "Сетап", "Режим", "Поставлено", "Отказ BoC", "Снято", "Исполнено", "Пара: обе ноги",
                     "Приб./убыт.", "Доля приб.", "Итог, тиков", "Итог, руб", "Тиков на цикл", "Фазы выхода",
                     "Маркаут 1/5/30 с", "Почему снимали" }
@@ -213,7 +223,7 @@ return function(SC)
 
   local function update_main(t)
     local n = #SC.insts
-    local tot_r, tot_v = 0, 0
+    local tot_r, tot_v, tot_u = 0, 0, 0
     for i, inst in ipairs(SC.insts) do
       local s = inst.sig
       local ph, bg = phase(inst, t)
@@ -222,7 +232,8 @@ return function(SC)
       local g = inst.gaps or {}
       local key_r, key_v = inst.sec .. "real", inst.sec .. "virtual"
       local pr, pv = SC.R.inst_pnl[key_r] or 0, SC.R.inst_pnl[key_v] or 0
-      tot_r, tot_v = tot_r + pr, tot_v + pv
+      local un = unreal(inst)
+      tot_r, tot_v, tot_u = tot_r + pr, tot_v + pv, tot_u + un
       local vals = {
         inst.sec, ph,
         s.valid and (inst:price_str(s.bb) .. " / " .. inst:price_str(s.ba)) or "-",
@@ -232,7 +243,7 @@ return function(SC)
         ep and string.format("%s, %.1f с", ep.cause == "sweep" and "вынос" or (ep.cause == "cancel" and "тихая" or "?"), t - ep.t0) or "",
         string.format("%d / %d", g.cancel or 0, g.sweep or 0),
         string.format("%d / %d", SC.C.position(inst, "real"), SC.C.position(inst, "virtual")),
-        cycles_str(inst), money(pr), money(pv),
+        cycles_str(inst), money(pr), money(un), money(pr + un), money(pv),
         reason(inst, "TIGHT"), reason(inst, "PAIR"), reason(inst, "FADE"), reason(inst, "WALL"),
       }
       if inst.skip then inst.skip = {} end
@@ -240,13 +251,17 @@ return function(SC)
       color("main", i, 2, bg)
       color("main", i, 7, ep and (ep.cause == "cancel" and CL.green or CL.yellow) or nil)
       color("main", i, 11, nil, sgn_color(pr))
-      color("main", i, 12, nil, sgn_color(pv))
+      color("main", i, 12, nil, sgn_color(un))
+      color("main", i, 13, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
+      color("main", i, 14, nil, sgn_color(pv))
     end
     local st = SC.O.stats
     set("main", n + 1, 1, "ВСЕГО")
     set("main", n + 1, 2, SC.O.halt and "ОСТАНОВЛЕН" or "")
     set("main", n + 1, 11, money(tot_r))
-    set("main", n + 1, 12, money(tot_v))
+    set("main", n + 1, 12, money(tot_u))
+    set("main", n + 1, 13, money(tot_r + tot_u))
+    set("main", n + 1, 14, money(tot_v))
     if T.stats then
       SetWindowCaption(T.stats.id, enc(SC.O.halt and ("ОСТАНОВЛЕН: " .. SC.O.halt) or
         string.format("Сетапы за день | транзакций %d (заявок %d, снятий %d), отказов BoC %d, прочих %d, ошибочных %d",
@@ -254,10 +269,12 @@ return function(SC)
     end
     color("main", n + 1, 2, SC.O.halt and CL.red or nil)
     color("main", n + 1, 11, nil, sgn_color(tot_r))
-    color("main", n + 1, 12, nil, sgn_color(tot_v))
-    SetWindowCaption(T.main.id, enc(string.format("Скальпер %s %s | %s | итог дня реал %s / вирт %s руб | лимит убытка -%s",
+    color("main", n + 1, 12, nil, sgn_color(tot_u))
+    color("main", n + 1, 13, (tot_r + tot_u) < 0 and CL.red or nil, sgn_color(tot_r + tot_u))
+    color("main", n + 1, 14, nil, sgn_color(tot_v))
+    SetWindowCaption(T.main.id, enc(string.format("Скальпер %s %s | %s | закрыто %s, открытые %s, ИТОГО %s руб | вирт %s | лимит убытка -%s",
       SC.cfg.MODE == "LIVE" and "БОЕВОЙ" or "БУМАГА", SC.cfg.ACCOUNT, window_text(t),
-      money(SC.R.pnl.real), money(SC.R.pnl.virtual), tostring(SC.cfg.DAILY_LOSS_LIMIT_RUB))))
+      money(SC.R.pnl.real), money(tot_u), money((SC.R.pnl.real or 0) + tot_u), money(SC.R.pnl.virtual), tostring(SC.cfg.DAILY_LOSS_LIMIT_RUB))))
   end
 
   local function update_stats()
