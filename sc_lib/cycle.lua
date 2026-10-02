@@ -159,6 +159,7 @@ return function(SC)
     end
     c.state = "DONE"
     c.t_done = t
+    if c.external then return end            -- закрыто вручную вне робота: в статистику не идёт
     SC.ST.on_done(c)
     SC.R.on_cycle_done(c, t)
   end

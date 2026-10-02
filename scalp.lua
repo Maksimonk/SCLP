@@ -389,6 +389,50 @@ end
 ------------------------------------------------------------------
 -- ИНИЦИАЛИЗАЦИЯ И ТАКТ
 ------------------------------------------------------------------
+------------------------------------------------------------------
+-- ПОСЛЕ ПЕРЕЗАПУСКА: сверка восстановленных позиций с позицией брокера. Если пока робот был выключен позицию
+-- закрыли вручную (целиком или частично), лишние циклы убираются - иначе их тейки открыли бы новую позицию.
+-- Убираются самые дальние от рынка. Результат вручную закрытого робот не знает и в итог не включает.
+------------------------------------------------------------------
+local function reconcile_restored(t)
+  if SC.cfg.MODE ~= "LIVE" or SC.cfg.RESTORE_CHECK_BROKER == false then return end
+  for _, inst in ipairs(SC.insts) do
+    local b = broker_pos(inst)
+    local mine = C.position(inst, "real")
+    if b and mine ~= 0 then
+      local excess = 0
+      if b == 0 or U.sign(b) ~= U.sign(mine) then excess = math.abs(mine)
+      elseif math.abs(b) < math.abs(mine) then excess = math.abs(mine) - math.abs(b) end
+      if excess > 0 then
+        U.alert(string.format("[%s] after restart: robot positions %d, broker %d -> %d lot(s) were closed outside the robot, dropping them",
+          inst.sec, mine, b, excess))
+        local list = {}
+        for _, c in ipairs(C.active(inst, "real")) do
+          if c.pos ~= 0 and U.sign(c.pos) == U.sign(mine) then list[#list + 1] = c end
+        end
+        -- самые дальние от рынка - первыми (лонг: самый высокий вход)
+        table.sort(list, function(a, b2) return (mine > 0) and (a.avg > b2.avg) or (a.avg < b2.avg) end)
+        for _, c in ipairs(list) do
+          if excess <= 0 then break end
+          local q = math.min(math.abs(c.pos), excess)
+          excess = excess - q
+          c.pos = c.pos - U.sign(c.pos) * q
+          U.log(string.format("[%s] cycle %d (%s @ %s): %d lot(s) closed outside the robot - removed", inst.sec, c.id,
+            c.setup, inst:price_str(c.avg), q))
+          if c.pos == 0 then
+            C.cancel_all(c, t, "external_close")
+            c.external = true
+            c.state = "CLOSE"
+          else
+            c.exit_wrong = true                 -- выход переставится на новый объём
+          end
+        end
+      end
+    end
+  end
+  SC.mark_state()
+end
+
 function SC.init()
   local user, err = read_user_config()
   if not user then error("scalp_config.lua: " .. tostring(err)) end
@@ -402,6 +446,7 @@ function SC.init()
   setup_instruments(user)
   if #SC.insts == 0 then U.alert("no instruments") end
   restore_state(t)
+  reconcile_restored(t)
   scan_foreign(t)
   W.open()
 end

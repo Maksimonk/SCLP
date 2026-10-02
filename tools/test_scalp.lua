@@ -499,6 +499,28 @@ check(rm and math.abs(rm - 5.4) < 0.1, "+0.1% of the index = +5.4 ticks of IMOEX
 check(SC.R.move_paused(SC.by_sec.IMOEXF, SIM.t), "index +0.1% (>0.06%) -> sharp-move pause on IMOEXF")
 check(not SC.R.move_paused(SC.by_sec.BMX6, SIM.t), "BM not affected")
 
+print("TEST 30: robot stopped, position closed by hand, restart -> positions not resurrected")
+fresh(tight_cfg()); flat_book(); SIM.run(1)
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 90 }, { 10003, 30 } })
+SIM.run(0.3)
+SIM.trade("BMX6", -1, 10000, 1)           -- лонг 1, тейк висит
+SIM.run(1.5)
+SIM.book("BMX6", { { 9999, 5 } }, { { 10002, 90 } })
+SC.shutdown()                              -- остановка: заявки сняты, состояние сохранено
+SIM.run(0.5)
+SIM.pos.BMX6 = 0                           -- позицию закрыли руками
+keep = SIM
+OnQuote, OnAllTrade, OnTransReply, OnOrder, OnTrade = nil, nil, nil, nil, nil
+SC = { dir = DIR, out_dir = OUT, config_override = tight_cfg() }
+SC.clock = function() return SIM.t end
+dofile(DIR .. "/tools/sim_quik.lua"); SIM = keep
+dofile(DIR .. "/scalp.lua"); SC.init()
+SIM.run(1)
+check(SC.C.position(SC.by_sec.BMX6, "real") == 0, "robot position 0 after manual close")
+local sells30 = 0
+for _, o in ipairs(real_orders(true)) do if o.side == "S" and o.px == 10001 then sells30 = sells30 + 1 end end
+check(sells30 == 0, "old take-profit not re-placed")
+
 ------------------------------------------------------------------
 print("TEST 13: random market 20 min (LIVE + virtual setups) - invariants")
 local function fuzz(mode, minutes, seed, hold)
