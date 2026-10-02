@@ -1,0 +1,12 @@
+# журналы и состояние скальпера
+scalp_*.log
+scalp_gaps_*.csv
+scalp_cycles_*.csv
+scalp_fills_*.csv
+rec_scalp_*.csv
+scalp_state.txt
+scalp_state.txt.tmp
+probe_passive_*.txt
+tools/test_out/
+__pycache__/
+.DS_Store
