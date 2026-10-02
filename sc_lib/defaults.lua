@@ -82,6 +82,7 @@ return {
     RECORD_MARKET = false,     -- писать стакан (5 уровней) и ленту в rec_scalp_<SEC>_<дата>.csv
     SHOW_TABLE = true,         -- окно состояния в QUIK
     DEBUG = false,
+    GC_KEEP_SEC = 1800,        -- завершённые заявки и учтённые сделки помнить N с, потом забывать (память)
     CMD_FILE = true,           -- команды в файле scalp_cmd.txt: pause / resume / flatten / cancel / show
   },
 

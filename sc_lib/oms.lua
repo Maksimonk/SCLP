@@ -421,11 +421,12 @@ return function(SC)
   ------------------------------------------------------------------
   -- ЧИСТКА ПАМЯТИ: завершённые заявки держат ссылки на свои циклы (с историей сделок). Без чистки индексы
   -- by_tid / by_num / kill_tid / trades_seen росли весь день вместе со всеми закрытыми циклами.
-  -- Заявка остаётся в индексах ещё GC_KEEP_SEC после завершения - на случай запоздавших сделок/ответов.
+  -- Заявка остаётся в индексах ещё GC_KEEP_SEC (30 мин) после завершения - на случай запоздавших сделок/ответов.
   ------------------------------------------------------------------
-  local GC_KEEP_SEC, t_gc = 120, 0
+  local t_gc = 0
+  local function keep_sec() return SC.cfg.GC_KEEP_SEC or 1800 end
   local function done_old(o, t)
-    return o.state == "done" and t - (o.t_done or t) > GC_KEEP_SEC and O.unsettled(o) == 0 and not O.await[o.id]
+    return o.state == "done" and t - (o.t_done or t) > keep_sec() and O.unsettled(o) == 0 and not O.await[o.id]
   end
   function O.gc(t)
     if t - t_gc < 10 then return end
@@ -433,10 +434,10 @@ return function(SC)
     for k, o in pairs(O.by_tid) do if done_old(o, t) then O.by_tid[k] = nil end end
     for k, o in pairs(O.by_num) do if done_old(o, t) then O.by_num[k] = nil end end
     for k, o in pairs(O.kill_tid) do
-      if o.state == "done" and t - (o.t_done or t) > GC_KEEP_SEC then O.kill_tid[k] = nil end
+      if o.state == "done" and t - (o.t_done or t) > keep_sec() then O.kill_tid[k] = nil end
     end
     for k, ts in pairs(O.trades_seen) do
-      if type(ts) ~= "number" or t - ts > 600 then O.trades_seen[k] = nil end
+      if type(ts) ~= "number" or t - ts > keep_sec() then O.trades_seen[k] = nil end
     end
     local n = 0
     for _ in pairs(O.reject_texts) do n = n + 1 end
