@@ -13,6 +13,8 @@ return function(SC)
     local b = a[setup] or {}
     a[setup] = b
     b[why] = (b[why] or 0) + 1
+    inst.skip = inst.skip or {}
+    inst.skip[setup] = why
     return nil
   end
 
@@ -241,8 +243,10 @@ return function(SC)
         if not ok and backend == "real" and why == "foreign_orders" then
           -- контракт котирует другой робот: реально не торгуем, но статистику копим виртуально
           backend = "virtual"
-          ok = SC.R.can_open(inst, backend, name, t)
+          ok, why = SC.R.can_open(inst, backend, name, t)
         end
+        inst.gate = inst.gate or {}
+        inst.gate[name] = ok and "" or why
         if ok then
           local spec = PROPOSE[name](inst, backend, t)
           if spec then

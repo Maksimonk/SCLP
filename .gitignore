@@ -10,3 +10,5 @@ probe_passive_*.txt
 tools/test_out/
 __pycache__/
 .DS_Store
+scalp_ui.lua
+scalp_ui.lua.tmp

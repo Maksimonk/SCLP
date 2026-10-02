@@ -213,6 +213,9 @@ return function(SC)
     inst.ep = nil
     ep.t1 = t
     ep.mid1 = inst.sig.mid
+    inst.gaps = inst.gaps or {}
+    inst.gaps[ep.cause] = (inst.gaps[ep.cause] or 0) + 1
+    inst.gap_dur = (inst.gap_dur or 0) + (t - ep.t0)
     inst.ep_pending[#inst.ep_pending + 1] = ep
   end
 
