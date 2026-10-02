@@ -171,6 +171,35 @@ function sendTransaction(t)
     end)
     return ""
   end
+  if t.ACTION == "NEW_ORDER" then           -- фиксированный формат (жёсткий стоп): лимитная "снять остаток"
+    local tid = tonumber(t.TRANS_ID)
+    local sec, side = t.SECCODE, t.OPERATION
+    local px = math.floor(tonumber(t.PRICE) / SIM.info[sec].tick + 0.5)
+    local qty = tonumber(t.QUANTITY)
+    SIM.taker_orders = (SIM.taker_orders or 0) + 1
+    SIM.at(SIM.latency, function()
+      SIM.next_num = SIM.next_num + 1
+      local o = { num = SIM.next_num, tid = tid, sec = sec, side = side, px = px, qty = qty, bal = qty,
+                  active = true, passive = false, queue = 0 }
+      SIM.resting[#SIM.resting + 1] = o
+      o.row = #SIM.rows + 1
+      if OnTransReply then OnTransReply({ trans_id = tid, status = 3, order_num = o.num, result_msg = cp("Заявка зарегистрирована") }) end
+      emit_order(o)
+      local key = (side == "B") and "asks" or "bids"
+      while o.bal > 0 do
+        local opp = best(sec, side == "B" and "S" or "B")
+        if not opp or (side == "B" and opp > px) or (side == "S" and opp < px) then break end
+        local q = math.min(o.bal, SIM.mkt[sec][key][opp])
+        SIM.mkt[sec][key][opp] = (SIM.mkt[sec][key][opp] - q > 0) and (SIM.mkt[sec][key][opp] - q) or nil
+        SIM.hard_fills = (SIM.hard_fills or 0) + 1
+        all_trade(sec, opp, q, side == "B" and 1 or -1)
+        fill_robot(o, q, opp)
+      end
+      if o.active then o.active = false; o.cancelled = true; emit_order(o) end
+      quote(sec)
+    end)
+    return ""
+  end
   if t.ACTION ~= cp("Ввод заявки") then return cp("Неизвестное действие") end
   local need = { "Торговый счет", "К/П", "Тип", "Инструмент", "Цена", "Количество" }
   for _, k in ipairs(need) do

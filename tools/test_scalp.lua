@@ -441,7 +441,7 @@ SIM.run(0.3)
 local c26
 for _, c in ipairs(SC.C.active(SC.by_sec.BMX6, "real")) do if c.pos ~= 0 then c26 = c end end
 if c26 then c26.tp_px = nil end            -- как после восстановления без второй ноги
-SIM.book("BMX6", { { 9950, 5 }, { 9949, 30 } }, { { 9952, 90 }, { 9953, 30 } })
+SIM.book("BMX6", { { 9975, 5 }, { 9974, 30 } }, { { 9977, 90 }, { 9978, 30 } })   -- -0.24%: ещё не стоп
 local bad = false
 for _ = 1, 600 do
   SIM.run(1)
@@ -451,6 +451,27 @@ for _ = 1, 600 do
   if c26 and c26.realized < 0 then bad = true end
 end
 check(not bad, "no sell order below the 100.00 entry during 10 minutes")
+
+print("TEST 28: soft stop at -0.3% (passive), hard stop at -0.5% (market order)")
+fresh(tight_cfg()); flat_book(); SIM.run(1)
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 90 }, { 10003, 30 } })
+SIM.run(0.3)
+SIM.trade("BMX6", -1, 10000, 1)          -- лонг 100.00
+SIM.run(0.3)
+SIM.book("BMX6", { { 9965, 5 }, { 9964, 30 } }, { { 9968, 90 }, { 9969, 30 } })   -- -0.335%
+SIM.run(0.5)
+local ex28
+for _, o in ipairs(SC.O.all_live(SC.by_sec.BMX6, "real")) do if o.role == "exit" then ex28 = o end end
+check(ex28 and ex28.side == "S" and ex28.px == 9966 and not ex28.taker, "soft stop: passive sell at bid + 1 (99.66), got " .. tostring(ex28 and ex28.px))
+check((SIM.hard_fills or 0) == 0, "no market order yet")
+SIM.book("BMX6", { { 9945, 5 }, { 9944, 30 } }, { { 9948, 90 }, { 9949, 30 } })   -- -0.535%
+SIM.run(1)
+check((SIM.taker_orders or 0) >= 1 and (SIM.hard_fills or 0) >= 1, "hard stop: market order sent and filled")
+check(SC.C.position(SC.by_sec.BMX6, "real") == 0 and (SIM.pos.BMX6 or 0) == 0, "flat after hard stop")
+local a28 = agg("TIGHT", "real")
+check(math.abs((a28.ticks or 0) + 55) < 1e-9, "-55 ticks (sold at best bid 99.45), got " .. tostring(a28.ticks))
+check((a28.rub or 0) < -55 * 0.8, "taker fee included in rubles: " .. tostring(a28.rub))
+check((SIM.taker_fills or 0) == 0, "no taker fills from passive orders")
 
 ------------------------------------------------------------------
 print("TEST 13: random market 20 min (LIVE + virtual setups) - invariants")

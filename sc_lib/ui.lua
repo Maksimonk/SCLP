@@ -107,7 +107,7 @@ return function(SC)
   local function why(w) return WHY[w] or tostring(w or "") end
   local SETUP = { PAIR = "пара в дырке 3+", TIGHT = "пара у рынка", FADE = "ловля выноса", WALL = "у стены", ADOPT = "принятая позиция" }
   local PHASE = { ENTRY = "заявки", TP = "тейк", DECAY = "тейк↓", HOLD = "+1 тик", BE = "безубыток", STOP = "СТОП",
-                  CLOSE = "закрытие", POS = "позиция" }
+                  CLOSE = "закрытие", POS = "позиция", HARD = "ЖЁСТКИЙ СТОП" }
 
   local function phase(inst, t)
     if SC.O.halt then return "ОСТАНОВЛЕН", CL.red end
@@ -138,7 +138,7 @@ return function(SC)
     cooldown = "пауза", gap_by_sweep = "дырка от выноса", recent_sweep = "был вынос", imbalance = "дисбаланс",
     ofi = "поток против", burst = "всплеск", ref_unknown = "нет BR", ref_moving = "BR движется",
     no_room = "мало места", ref_confirms = "BR за выносом", max_pos = "лимит позиции", tx_limit = "лимит tx",
-    sharp_move = "резкое движ.", hole1_volumes = "объёмы < 1.4", hole0_no_wall = "нет стен",
+    sharp_move = "резкое движ.", hard_stop = "жёсткий стоп", hole1_volumes = "объёмы < 1.4", hole0_no_wall = "нет стен",
     hole0_volumes = "стены < x3", hole2_off = "выкл", self_cross = "против своей", cmd_pause = "пауза (команда)",
   }
   local function reason(inst, name)
@@ -308,7 +308,7 @@ return function(SC)
       if a then
         local n = a.wins + a.losses + a.flat
         local ph = {}
-        for _, p in ipairs({ "TP", "DECAY", "HOLD", "BE", "STOP" }) do
+        for _, p in ipairs({ "TP", "DECAY", "HOLD", "BE", "STOP", "HARD" }) do
           if a.phase[p] then ph[#ph + 1] = (PHASE[p] or p) .. " " .. a.phase[p] end
         end
         local rs = {}
@@ -341,7 +341,7 @@ return function(SC)
       if f then
         local vals = { os.date("%H:%M:%S", floor(f.t)) .. string.format(".%03d", floor((f.t % 1) * 1000)),
           f.sec, f.cid and tostring(f.cid) or "", SETUP[f.setup] or f.setup, f.backend == "real" and "реал" or "вирт",
-          f.side == "B" and "покупка" or "продажа", tostring(f.q), f.px, f.role == "exit" and "выход" or "вход",
+          f.side == "B" and "покупка" or "продажа", tostring(f.q), f.px, (f.role == "exit" and "выход") or (f.role == "hard" and "стоп по рынку") or "вход",
           f.entry or "", tostring(f.pos), f.ticks and string.format("%+.1f", f.ticks) or "", f.net and money(f.net) or "" }
         for col, v in ipairs(vals) do set("trades", i, col, v) end
         color("trades", i, 5, f.backend == "real" and CL.green or CL.grey)

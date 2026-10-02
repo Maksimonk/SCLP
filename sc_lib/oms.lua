@@ -105,6 +105,14 @@ return function(SC)
     for k, v in pairs(SC.cfg.TX_EXTRA or {}) do t[enc(k)] = enc(v) end
     return t
   end
+  function O.build_taker(inst, side, px, qty, tid)
+    local t = { ACCOUNT = SC.cfg.ACCOUNT, CLASSCODE = inst.class, SECCODE = inst.sec, ACTION = "NEW_ORDER",
+                TYPE = "L", OPERATION = side, PRICE = inst:price_str(px), QUANTITY = U.qty_str(qty),
+                EXECUTION_CONDITION = "KILL_BALANCE", TRANS_ID = string.format("%d", tid) }
+    if (SC.cfg.CLIENT_CODE or "") ~= "" then t.CLIENT_CODE = SC.cfg.CLIENT_CODE end
+    return t
+  end
+
   function O.build_kill(inst, key, tid)
     local t = { ACCOUNT = SC.cfg.ACCOUNT, CLASSCODE = inst.class, SECCODE = inst.sec,
                 ACTION = "KILL_ORDER", ORDER_KEY = key, TRANS_ID = string.format("%d", tid) }
@@ -156,7 +164,7 @@ return function(SC)
     O.by_tid[o.tid] = o
     o.state = "sent"; o.t_sent = t
     O.stats.new = O.stats.new + 1
-    local res = send(O.build_new(inst, o.side, o.px, o.qty, o.tid))
+    local res = send(o.taker and O.build_taker(inst, o.side, o.px, o.qty, o.tid) or O.build_new(inst, o.side, o.px, o.qty, o.tid))
     if res ~= "" then
       -- QUIK не принял транзакцию: почти всегда - неверные названия полей универсального формата
       local msg = U.from_cp1251(res)
@@ -174,8 +182,10 @@ return function(SC)
   end
 
   -- поставить (или поставить в очередь до жетона)
-  function O.place(inst, backend, side, px, qty, cycle, role, t)
+  -- taker = true: обычная лимитированная заявка "снять остаток" (фиксированный формат) - только жёсткий стоп
+  function O.place(inst, backend, side, px, qty, cycle, role, t, taker)
     local o = O.new_order(inst, backend, side, px, qty, cycle, role)
+    o.taker = taker or nil
     send_new(o, t or U.now())
     return o
   end
@@ -298,7 +308,7 @@ return function(SC)
   end
 
   local function passive_flag_check(o, row)
-    if not SC.cfg.CHECK_PASSIVE_FLAG or O.passive_checked then return end
+    if not SC.cfg.CHECK_PASSIVE_FLAG or O.passive_checked or o.taker then return end
     local v = row.passive_only_order
     if v == nil then return end
     O.passive_checked = true

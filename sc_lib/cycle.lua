@@ -103,6 +103,9 @@ return function(SC)
       apply_fill(c, o.side, q, px, t)
       c.fills[#c.fills + 1] = { t = t, side = o.side, q = q, px = px, role = o.role }
       SC.ST.on_fill(c, o, q, px, t)
+      if o.taker then
+        c.taker_fee = (c.taker_fee or 0) + px * (c.inst.step_price or 0) * q * (c.inst.P.TAKER_FEE_PCT or 0) / 100
+      end
       SC.fills_log = SC.fills_log or {}
       table.insert(SC.fills_log, { t = t, sec = c.inst.sec, side = o.side, q = q, px = c.inst:price_str(px),
         setup = c.setup, backend = c.backend, role = o.role, pos = c.pos + 0,
@@ -181,6 +184,12 @@ return function(SC)
       c.t_adv = nil
     end
     local phase
+    if (P.SOFT_STOP_PCT or 0) > 0 and avg and adverse >= avg * P.SOFT_STOP_PCT / 100 and not c.stop_since then
+      c.stop_since = t                     -- мягкий стоп: ушли против на SOFT_STOP_PCT % (STOP не отменяется)
+      c.stop_reason = "soft_pct"
+      U.log(string.format("[%s] cycle %d: price %.2f%% against entry %s - SOFT STOP, closing passively", inst.sec, c.id,
+        100 * adverse / avg, inst:price_str(avg)))
+    end
     if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and not c.tp_px and avg then
       -- цели нет (переворот позиции, восстановление без второй ноги): +MIN_PROFIT от входа, но НЕ в убыток
       c.tp_px = long and ceil(avg + P.MIN_PROFIT_TICKS - 1e-9) or floor(avg - P.MIN_PROFIT_TICKS + 1e-9)
@@ -242,6 +251,35 @@ return function(SC)
     -- POS
     if not inst.sig.valid then return end
     if SC.R.force_exit(inst, c, t) then c.force_stop = true end
+    -- ЖЁСТКИЙ СТОП: цена ушла против на HARD_STOP_PCT % -> тейк-заявка по рынку
+    local s = inst.sig
+    local adv = (c.pos > 0) and (c.avg - s.mid) or (s.mid - c.avg)
+    if not c.hard and (P.HARD_STOP_PCT or 0) > 0 and c.avg and adv >= c.avg * P.HARD_STOP_PCT / 100 then
+      c.hard = t
+      U.log(string.format("[%s] cycle %d: price %.2f%% against entry %s - HARD STOP, closing by market", inst.sec,
+        c.id, 100 * adv / c.avg, inst:price_str(c.avg)))
+    end
+    if c.hard then
+      c.phase = "HARD"
+      for _, o in ipairs(live_orders(c)) do
+        if not o.taker and not o.want_kill then SC.O.cancel(o, t, "hard_stop") end
+      end
+      if unsettled(c) > 0 then return end
+      for _, o in ipairs(live_orders(c)) do return end     -- ждём снятия выхода / ответа по тейк-заявке
+      if t - (c.t_hard_sent or 0) < P.HARD_STOP_RETRY_SEC then return end
+      local hside = exit_side(c)
+      local hpx = (hside == "S") and (s.bb - P.HARD_STOP_SLIP_TICKS) or (s.ba + P.HARD_STOP_SLIP_TICKS)
+      for _, x in ipairs(SC.O.all_live(inst, c.backend)) do      -- не встать против своей заявки (кросс-сделка)
+        if x.side ~= hside then
+          if hside == "S" and hpx <= x.px then hpx = x.px + 1 end
+          if hside == "B" and hpx >= x.px then hpx = x.px - 1 end
+        end
+      end
+      local o = SC.O.place(inst, c.backend, hside, hpx, abs(c.pos), c, "hard", t, true)
+      c.orders[#c.orders + 1] = o
+      c.t_hard_sent = t
+      return
+    end
     local px, phase = C.exit_price(c, t)
     if phase ~= c.phase then
       U.dbg(string.format("[%s] cycle %d phase %s -> %s px=%d", inst.sec, c.id, tostring(c.phase), phase, px))
@@ -259,7 +297,7 @@ return function(SC)
       local rem = e.qty - e.filled
       local need_move = (e.side ~= side) or (rem ~= qty) or c.exit_wrong
       if not need_move and e.px ~= px then
-        local interval = (phase == "STOP") and P.EXIT_REQUOTE_SEC or 1.0
+        local interval = (phase == "STOP") and P.EXIT_REQUOTE_SEC or 0.3
         if phase == "TP" and e.px == c.tp_px then interval = 1e9 end
         -- выход лучше нужного для нас (например, висячая нога пары) не трогаем, пока фаза TP
         if t - (c.t_exit or c.t0) >= interval then need_move = true end
@@ -273,7 +311,7 @@ return function(SC)
     c.exit = nil
     if unsettled(c) > 0 then return end              -- ждём сделки по уже исполненному
     for _, o in ipairs(live_orders(c)) do return end  -- ждём подтверждения снятия всего лишнего
-    if c.exit_rejected_t and t - c.exit_rejected_t < 0.3 then return end   -- отказ выхода = рынок ушёл в нашу сторону
+    if c.exit_rejected_t and t - c.exit_rejected_t < 0.1 then return end   -- отказ выхода = рынок ушёл в нашу сторону
     -- не встать против своей же заявки другого цикла (кросс-сделка)
     for _, x in ipairs(SC.O.all_live(inst, c.backend)) do
       if x.side ~= side then

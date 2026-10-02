@@ -39,6 +39,19 @@ return function(SC)
     local bb = raw and raw.bids[1] and raw.bids[1].p
     local ba = raw and raw.asks[1] and raw.asks[1].p
     local cross = (o.side == "B" and ba and o.px >= ba) or (o.side == "S" and bb and o.px <= bb)
+    if o.taker then                              -- жёсткий стоп: исполнение по лучшей встречной, остаток снят
+      o.state = "active"; o.t_active = t
+      SC.C.on_order_event(o, "accepted")
+      if cross then
+        SC.O.fill(o, o.qty - o.filled, (o.side == "B") and ba or bb, t)
+      end
+      if o.state ~= "done" then
+        o.state = "done"; o.how = "cancelled"; o.t_done = t
+        SC.O.live[o.id] = nil
+        SC.C.on_order_event(o, "cancelled")
+      end
+      return
+    end
     if cross then
       o.state = "done"; o.how = "rejected"; o.reject = "boc"; o.t_done = t
       SC.O.live[o.id] = nil

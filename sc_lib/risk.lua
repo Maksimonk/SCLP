@@ -93,20 +93,32 @@ return function(SC)
       local lim = inst.P.INST_LOSS_LIMIT_RUB or 0
       if lim > 0 and (R.inst_pnl[key] or 0) <= -lim then return false, "inst_loss" end
       if SC.paused then return false, "cmd_pause" end
+      for _, c in ipairs(SC.C.active(inst, "real")) do
+        if c.hard then return false, "hard_stop" end           -- идёт жёсткий стоп - новые пары не ставим
+      end
       local act = SC.C.active(inst, "real")
       for _, c in ipairs(act) do
-        if c.state == "ENTRY" then return false, "busy" end          -- в стакане одна пара за раз
+        -- в стакане одна пара за раз; пара, которая уже снимается целиком, следующей не мешает
+        if c.state == "ENTRY" and R.entry_live(c) then return false, "busy" end
       end
       if #act >= R.max_cycles(inst) then return false, "max_cycles" end
     else
       for _, c in ipairs(SC.C.active(inst, "virtual", setup)) do
-        if c.state == "ENTRY" then return false, "busy" end
+        if c.state == "ENTRY" and R.entry_live(c) then return false, "busy" end
       end
       if #SC.C.active(inst, "virtual", setup) >= R.max_cycles(inst) then return false, "max_cycles" end
     end
     if t < (R.pause_until[key] or 0) then return false, "streak_pause" end
     if t - (R.last_loss[key] or -1e9) < inst.P.LOSS_COOLDOWN_SEC then return false, "loss_cooldown" end
     return true
+  end
+
+  -- входная пара ещё "живая": хотя бы одна её заявка не снимается
+  function R.entry_live(c)
+    for _, o in ipairs(SC.C.live_orders(c)) do
+      if not o.want_kill then return true end
+    end
+    return false
   end
 
   function R.max_cycles(inst)
@@ -208,7 +220,7 @@ return function(SC)
   ------------------------------------------------------------------
   function R.cycle_rub(c)
     local inst = c.inst
-    return c.realized * (inst.step_price or 0) - (inst.P.BROKER_FEE_RUB or 0) * c.traded
+    return c.realized * (inst.step_price or 0) - (inst.P.BROKER_FEE_RUB or 0) * c.traded - (c.taker_fee or 0)
   end
 
   function R.on_cycle_done(c, t)

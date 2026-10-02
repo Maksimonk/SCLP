@@ -495,7 +495,7 @@ function main()
         SC.running = false
       end
     end
-    U.flush()
+    if t - (SC.t_flush or 0) >= 0.5 then SC.t_flush = t; U.flush() end   -- диск - не чаще 2 раз в секунду
     sleep(SC.cfg.LOOP_MS or 10)
   end
   pcall(SC.shutdown)
