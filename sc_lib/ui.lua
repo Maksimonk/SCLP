@@ -123,18 +123,26 @@ return function(SC)
     return "ЖДЁТ ДЫРКУ", nil
   end
 
-  local function status(inst)
-    local parts = {}
-    for _, name in ipairs({ "TIGHT", "PAIR", "FADE", "WALL" }) do
-      local mode = (inst.P.SETUPS or {})[name]
-      if mode and mode ~= "off" then
-        local g = inst.gate and inst.gate[name]
-        local w = (g and g ~= "") and g or (inst.skip and inst.skip[name])
-        if w then parts[#parts + 1] = name .. ": " .. why(w) end
-      end
-    end
-    if inst.skip then inst.skip = {} end
-    return table.concat(parts, "; ")
+  -- короткие причины для узких колонок (ячейки QUIK не переносят текст)
+  local SHORT = {
+    startup = "старт", session_closed = "вне торгов", session_tail = "конец окна", no_book = "нет стакана",
+    disconnected = "нет связи", book_frozen = "стакан замёрз", book_stale = "стакан стоит", data_recover = "данные",
+    disabled = "экспирация", halt = "СТОП", reject_pause = "пауза: отказы", day_loss = "лимит дня",
+    err_tx_limit = "ошибки tx", foreign_orders = "чужие заявки", inst_loss = "лимит инстр.", busy = "цикл идёт",
+    max_cycles = "позиция = MAX", streak_pause = "серия убытков", loss_cooldown = "после убытка",
+    cooldown = "пауза", gap_by_sweep = "дырка от выноса", recent_sweep = "был вынос", imbalance = "дисбаланс",
+    ofi = "поток против", burst = "всплеск", ref_unknown = "нет BR", ref_moving = "BR движется",
+    no_room = "мало места", ref_confirms = "BR за выносом", max_pos = "лимит позиции", tx_limit = "лимит tx",
+    sharp_move = "резкое движ.", hole1_volumes = "объёмы < 1.4", hole0_no_wall = "нет стен",
+    hole0_volumes = "стены < x3", hole2_off = "выкл", self_cross = "против своей", cmd_pause = "пауза (команда)",
+  }
+  local function reason(inst, name)
+    local mode = (inst.P.SETUPS or {})[name]
+    if not mode or mode == "off" then return "выкл" end
+    local g = inst.gate and inst.gate[name]
+    local w = (g and g ~= "") and g or (inst.skip and inst.skip[name])
+    if not w then return "ждёт" end
+    return SHORT[w] or why(w)
   end
 
   local function cycles_str(inst)
@@ -155,8 +163,8 @@ return function(SC)
   ------------------------------------------------------------------
   local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Дырка сейчас",
                       "Дырок за день (тихих/вынос)", "Позиция реал/вирт", "Циклы и заявки", "Итог реал, руб",
-                      "Итог вирт, руб", "Почему не входит" }
-  local MAIN_W = { 10, 18, 15, 7, 10, 10, 18, 16, 12, 40, 12, 12, 60 }
+                      "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
+  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 34, 12, 12, 15, 15, 15, 15 }
   local ST_COLS = { "Инструмент", "Сетап", "Режим", "Поставлено", "Отказ BoC", "Снято", "Исполнено", "Пара: обе ноги",
                     "Приб./убыт.", "Доля приб.", "Итог, тиков", "Итог, руб", "Тиков на цикл", "Фазы выхода",
                     "Маркаут 1/5/30 с", "Почему снимали" }
@@ -219,8 +227,10 @@ return function(SC)
         ep and string.format("%s, %.1f с", ep.cause == "sweep" and "вынос" or (ep.cause == "cancel" and "тихая" or "?"), t - ep.t0) or "",
         string.format("%d / %d", g.cancel or 0, g.sweep or 0),
         string.format("%d / %d", SC.C.position(inst, "real"), SC.C.position(inst, "virtual")),
-        cycles_str(inst), money(pr), money(pv), status(inst),
+        cycles_str(inst), money(pr), money(pv),
+        reason(inst, "TIGHT"), reason(inst, "PAIR"), reason(inst, "FADE"), reason(inst, "WALL"),
       }
+      if inst.skip then inst.skip = {} end
       for col, v in ipairs(vals) do set("main", i, col, v) end
       color("main", i, 2, bg)
       color("main", i, 7, ep and (ep.cause == "cancel" and CL.green or CL.yellow) or nil)
@@ -232,9 +242,11 @@ return function(SC)
     set("main", n + 1, 2, SC.O.halt and "ОСТАНОВЛЕН" or "")
     set("main", n + 1, 11, money(tot_r))
     set("main", n + 1, 12, money(tot_v))
-    set("main", n + 1, 13, SC.O.halt and ("ОСТАНОВЛЕН: " .. SC.O.halt) or
-      string.format("транзакций %d (заявок %d, снятий %d), отказов BoC %d, прочих %d, ошибочных %d",
-        st.tx, st.new, st.kill, st.rej_boc, st.rej_other, st.err_tx))
+    if T.stats then
+      SetWindowCaption(T.stats.id, enc(SC.O.halt and ("ОСТАНОВЛЕН: " .. SC.O.halt) or
+        string.format("Сетапы за день | транзакций %d (заявок %d, снятий %d), отказов BoC %d, прочих %d, ошибочных %d",
+          st.tx, st.new, st.kill, st.rej_boc, st.rej_other, st.err_tx)))
+    end
     color("main", n + 1, 2, SC.O.halt and CL.red or nil)
     color("main", n + 1, 11, nil, sgn_color(tot_r))
     color("main", n + 1, 12, nil, sgn_color(tot_v))
