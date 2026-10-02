@@ -30,7 +30,12 @@ return function(SC)
     local d = QTABLE_DEFAULT_COLOR or -1
     pcall(SetColor, tb.id, tb.rows[row], col or (QTABLE_NO_INDEX or -1), bg or d, fg or d, bg or d, fg or d)
   end
-  local function money(v) return string.format("%+.0f", v or 0) end
+  -- рубли с копейками до 1000 (тик BM ~0.83 руб - без копеек +0.83 выглядело бы как +1)
+  local function money(v)
+    v = v or 0
+    if math.abs(v) < 1000 then return string.format("%+.2f", v) end
+    return string.format("%+.0f", v)
+  end
   local function sgn_color(v) return (v or 0) >= 0 and CL.pos or CL.neg end
 
   ------------------------------------------------------------------
