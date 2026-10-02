@@ -177,7 +177,11 @@ local function save_state(t, force)
       c.realized, c.traded, tostring(c.pair and true or false), c.entry_side and ("'" .. c.entry_side .. "'") or "nil",
       c.n_filled_legs or 0, table.concat(os_, ", "))
   end
-  L[#L + 1] = "} }"
+  -- итоги дня: прибыль/убыток, статистика сетапов, дырки, последние исполнения (чтобы перезапуск не обнулял их)
+  local gaps = {}
+  for _, inst in ipairs(SC.insts) do gaps[inst.sec] = { n = inst.gaps or {}, dur = inst.gap_dur or 0 } end
+  L[#L + 1] = "}, stats = " .. U.serialize({ pnl = R.pnl, inst_pnl = R.inst_pnl, streak = R.streak,
+    day_stop = R.day_stop, agg = ST.agg, gaps = gaps, fills_log = SC.fills_log or {}, fills_seq = SC.fills_seq or 0 }) .. " }"
   U.write_file_atomic(state_path(), table.concat(L, "\n"))
 end
 function SC.mark_state() state_dirty = true end
@@ -203,6 +207,21 @@ local function restore_state(t)
   local today = ok and type(st) == "table" and st.day == U.date("%Y%m%d", t)
   local live = SC.cfg.MODE == "LIVE"
   local rows = live and orders_rows() or { by_key = {}, by_tid = {}, used = {}, list = {} }
+  if today and type(st.stats) == "table" then
+    local x = st.stats
+    for k, v in pairs(x.pnl or {}) do R.pnl[k] = v end
+    for k, v in pairs(x.inst_pnl or {}) do R.inst_pnl[k] = v end
+    for k, v in pairs(x.streak or {}) do R.streak[k] = v end
+    if x.day_stop then R.day_stop = true end
+    for k, a in pairs(x.agg or {}) do ST.agg[k] = a end
+    for sec, g in pairs(x.gaps or {}) do
+      local inst = SC.by_sec[sec]
+      if inst then inst.gaps = g.n or {}; inst.gap_dur = g.dur or 0 end
+    end
+    SC.fills_log = x.fills_log or {}
+    SC.fills_seq = (x.fills_seq or 0) + 1
+    U.log(string.format("day results restored: real %+.2f / virtual %+.2f RUB", R.pnl.real or 0, R.pnl.virtual or 0))
+  end
   if today then
     for _, sv in ipairs(st.cycles or {}) do
       local inst = SC.by_sec[sv.sec]

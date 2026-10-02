@@ -242,6 +242,28 @@ return function(SC)
   end
 
   -- глубокое слияние таблиц настроек (массивы заменяются целиком)
+  -- таблица -> текст Lua (числа, строки, логические, вложенные таблицы)
+  function U.serialize(v)
+    local t = type(v)
+    if t == "number" then
+      if v ~= v or v == math.huge or v == -math.huge then return "0" end
+      if math.type and math.type(v) == "integer" then return string.format("%d", v) end
+      return string.format("%.10g", v)
+    elseif t == "string" then return string.format("%q", v)
+    elseif t == "boolean" then return tostring(v)
+    elseif t == "table" then
+      local parts = {}
+      for k, x in pairs(v) do
+        if type(x) ~= "function" and type(x) ~= "userdata" then
+          local key = (type(k) == "string" and k:match("^[%a_][%w_]*$")) and k or ("[" .. U.serialize(k) .. "]")
+          parts[#parts + 1] = key .. " = " .. U.serialize(x)
+        end
+      end
+      return "{ " .. table.concat(parts, ", ") .. " }"
+    end
+    return "nil"
+  end
+
   function U.merge(base, over)
     local r = {}
     for k, v in pairs(base or {}) do r[k] = v end

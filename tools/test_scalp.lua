@@ -408,6 +408,16 @@ SIM.run(0.5)
 check(SC.C.position(SC.by_sec.BMX6, "real") == 0, "adopted exit filled -> flat")
 check(math.abs((agg("TIGHT", "real").ticks or 0) - 1) < 1e-9, "+1 tick on the restored cycle")
 check(#SC.C.active(SC.by_sec.BMX6, "real") <= 1, "second restored pair still managed")
+local pnl_before = SC.R.pnl.real
+SIM.run(1.5)
+SC = { dir = DIR, out_dir = OUT, config_override = tight_cfg() }
+SC.clock = function() return SIM.t end
+keep = SIM
+OnQuote, OnAllTrade, OnTransReply, OnOrder, OnTrade = nil, nil, nil, nil, nil
+dofile(DIR .. "/tools/sim_quik.lua"); SIM = keep
+dofile(DIR .. "/scalp.lua"); SC.init()
+check(math.abs((SC.R.pnl.real or 0) - pnl_before) < 1e-9 and pnl_before > 0, "day P&L survives restart: " .. tostring(SC.R.pnl.real))
+check(math.abs((agg("TIGHT", "real").ticks or 0) - 1) < 1e-9, "setup stats survive restart")
 
 print("TEST 25: command file 'flatten' -> STOP phase, no new entries")
 fresh(tight_cfg()); flat_book(); SIM.run(1)
