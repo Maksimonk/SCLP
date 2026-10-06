@@ -70,6 +70,7 @@ return function(SC)
     inst.t_book_change = nil
     inst.t_book_read = nil
     inst.t_last_trade = nil
+    if SC.A then SC.A.new(inst) end
   end
 
   ------------------------------------------------------------------
@@ -357,13 +358,18 @@ return function(SC)
     local R = inst.ref
     if not R then return end
     R.t_read = t
-    local mid
+    local mid, micro
     if R.source ~= "last" then                     -- середина стакана опорного
       local ok, q = pcall(getQuoteLevel2, R.class, R.sec)
       if ok and type(q) == "table" then
         local bids = parse_side(q.bid, q.bid_count, R.tick, true)
         local asks = parse_side(q.offer, q.offer_count, R.tick, false)
-        if bids[1] and asks[1] and bids[1].p < asks[1].p then mid = (bids[1].p + asks[1].p) / 2 * R.tick end
+        if bids[1] and asks[1] and bids[1].p < asks[1].p then
+          mid = (bids[1].p + asks[1].p) / 2 * R.tick
+          -- микроцена опорного (для lead-lag): взвешена объёмами L1
+          local b1, a1 = bids[1], asks[1]
+          micro = (a1.p * b1.q + b1.p * a1.q) / (b1.q + a1.q) * R.tick
+        end
       end
     end
     if not mid and getParamEx then                 -- индекс (стакана нет) или пустой стакан: последняя цена
@@ -376,6 +382,11 @@ return function(SC)
     local m = R.mids
     if not m[#m] or m[#m].mid ~= mid then m[#m + 1] = { t = t, mid = mid } end
     while #m > 2 and m[2].t < t - 30 do table.remove(m, 1) end
+    micro = micro or mid
+    R.micros = R.micros or {}
+    local mc = R.micros
+    if not mc[#mc] or mc[#mc].v ~= micro then mc[#mc + 1] = { t = t, v = micro } end
+    while #mc > 2 and mc[2].t < t - 30 do table.remove(mc, 1) end
   end
 
   -- движение опорного за REF_WINDOW_SEC в ПРОЦЕНТАХ, пересчитанное в тики инструмента (процент x его цена):

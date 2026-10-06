@@ -17,6 +17,7 @@ return function(SC)
     inst.skip[setup] = why
     return nil
   end
+  S.nope = nope
 
   S.last_end = {}    -- [sec..setup..backend] = время конца последнего цикла
   function S.note_done(c)
@@ -26,6 +27,7 @@ return function(SC)
     local e = S.last_end[inst.sec .. setup .. backend]
     return e and (t - e) or 1e9
   end
+  S.since_end = since_end
 
   ------------------------------------------------------------------
   -- PAIR: "тихая" дырка у рынка
@@ -36,7 +38,7 @@ return function(SC)
     local function fit(shift)
       local bid = U.clamp(s.bb + P.PAIR_INSIDE + shift, lo, hi)
       local ask = U.clamp(s.ba - P.PAIR_INSIDE + shift, lo, hi)
-      if ask - bid >= P.PAIR_MIN_CAPTURE then return bid, ask end
+      if ask - bid >= math.max(P.PAIR_MIN_CAPTURE, SC.R.min_capture(inst)) then return bid, ask end
     end
     local shift = U.round(P.PAIR_MICRO_SKEW * (s.micro - s.mid))
     local bid, ask = fit(shift)
@@ -175,12 +177,24 @@ return function(SC)
     end
   end
 
+  -- айсберг (скрытый объём, alpha.lua) - тоже стена: встаём на тик впереди него
+  local function iceberg_wall(inst, side)
+    local ice = inst.A and inst.A.iceberg
+    if not ice or ice.side ~= side or not inst.P.WALL_ICEBERG then return nil end
+    local s = inst.sig
+    local px = (side == "B") and ice.p + 1 or ice.p - 1
+    if (side == "B" and px >= s.ba) or (side == "S" and px <= s.bb) then return nil end
+    return { p = ice.p, q = ice.visible, iceberg = true }, px
+  end
+
   function S.wall_propose(inst, backend, t)
     local P, s, nb = inst.P, inst.sig, inst.net
     local name = "WALL"
     if since_end(inst, name, backend, t) < P.WALL_COOLDOWN_SEC then return nil end
     local bw, bpx = find_wall(inst, nb.bids, s.bb, 1)
     local aw, apx = find_wall(inst, nb.asks, s.ba, -1)
+    if not bw then bw, bpx = iceberg_wall(inst, "B") end
+    if not aw then aw, apx = iceberg_wall(inst, "S") end
     if not bw and not aw then return nil end
     local side, wall, px
     if bw and (not aw or (s.bb - bw.p) <= (aw.p - s.ba)) then side, wall, px = "B", bw, bpx
@@ -189,8 +203,8 @@ return function(SC)
       setup = name, pair = false,
       legs = { { side = side, px = px, qty = P.QUOTE_SIZE } },
       tp = function(c) return c.pos > 0 and math.ceil(c.avg + P.WALL_TP_TICKS - 1e-9) or math.floor(c.avg - P.WALL_TP_TICKS + 1e-9) end,
-      info = { wall_px = wall.p, wall_q = wall.q },
-      wall = { p = wall.p, q = wall.q, side = side },
+      info = { wall_px = wall.p, wall_q = wall.q, iceberg = wall.iceberg and 1 or 0 },
+      wall = { p = wall.p, q = wall.q, side = side, iceberg = wall.iceberg },
     }
   end
 
@@ -203,7 +217,9 @@ return function(SC)
     local levels = (w.side == "B") and inst.net.bids or inst.net.asks
     local q = 0
     for _, l in ipairs(levels) do if l.p == w.p then q = l.q end end
-    if q < P.WALL_PULL_FRAC * w.q then return "wall_pulled" end
+    if w.iceberg then
+      if q <= 0 then return "wall_pulled" end                 -- у айсберга видна только вершина: снят ли уровень
+    elseif q < P.WALL_PULL_FRAC * w.q then return "wall_pulled" end
     -- цена подошла медленно (пустота заполнилась) - преимущество пропало
     for _, o in ipairs(SC.C.live_orders(c)) do
       local gap = (o.side == "B") and (s.bb - o.px) or (o.px - s.ba)
@@ -246,6 +262,7 @@ return function(SC)
     local P, s = inst.P, inst.sig
     local name = "TIGHT"
     if s.spread > 3 then return nil end
+    if SC.R.min_capture(inst) > 1 then return nope(inst, name, "costs") end   -- захват 1 тик не покрывает комиссию
     if SC.R.move_paused(inst, t) then return nope(inst, name, "sharp_move") end
     if since_end(inst, name, backend, t) < P.TIGHT_COOLDOWN_SEC then return nope(inst, name, "cooldown") end
     local bid, ask, why = S.tight_prices(inst)
@@ -279,11 +296,15 @@ return function(SC)
   ------------------------------------------------------------------
   -- ОБХОД СЕТАПОВ
   ------------------------------------------------------------------
-  local PROPOSE = { PAIR = S.pair_propose, TIGHT = S.tight_propose, FADE = S.fade_propose, WALL = S.wall_propose }
-  local CHECK = { PAIR = pair_check, TIGHT = tight_check, FADE = fade_check, WALL = wall_check }
-  S.ORDER = { "FADE", "PAIR", "TIGHT", "WALL" }
+  local PROPOSE = { PAIR = S.pair_propose, TIGHT = S.tight_propose, FADE = S.fade_propose, WALL = S.wall_propose,
+                    MM = SC.M.propose, MOMO = SC.BO.momo_propose, SQZ = SC.BO.sqz_propose, NEWS = SC.BO.news_propose }
+  local CHECK = { PAIR = pair_check, TIGHT = tight_check, FADE = fade_check, WALL = wall_check, MM = SC.M.check }
+  S.ORDER = { "NEWS", "MOMO", "SQZ", "FADE", "PAIR", "TIGHT", "MM", "WALL" }
 
   function S.entry_check(c, t)
+    -- фильтр неблагоприятного отбора (Cancel-on-Mismatch) - для всех пассивных входов
+    local g = SC.G.entry_check(c, t)
+    if g then return g end
     local f = CHECK[c.setup]
     if f then return f(c, t) end
     return nil
@@ -292,7 +313,8 @@ return function(SC)
   function S.backend_for(inst, setup)
     local mode = (inst.P.SETUPS or {})[setup] or "off"
     if mode == "off" then return nil end
-    if SC.cfg.MODE == "LIVE" and mode == "live" then return "real" end
+    -- сетап статистически значимо теряет деньги сегодня - до конца дня только виртуально
+    if SC.cfg.MODE == "LIVE" and mode == "live" and not SC.G.is_demoted(inst, setup) then return "real" end
     return "virtual"
   end
 
@@ -312,7 +334,8 @@ return function(SC)
         if ok then
           local spec = PROPOSE[name](inst, backend, t)
           if spec then
-            local fits, why = SC.R.fits(inst, backend, spec, t)
+            local fits, why = SC.G.filter(inst, spec, t)
+            if fits then fits, why = SC.R.fits(inst, backend, spec, t) end
             if fits then
               spec.backend = backend
               local c = SC.C.open(inst, spec, t)

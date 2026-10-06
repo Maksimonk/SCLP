@@ -103,11 +103,16 @@ return function(SC)
     max_cycles = "позиция набрана (MAX_POS)", self_cross = "встали бы против своей заявки", cmd_pause = "пауза командой",
     cmd = "снято командой", requote = "перестановка", add_side = "снята нога набора", extra = "лишняя",
     partial_rest = "остаток после частичного", stop = "остановка робота",
+    edge = "нет перевеса после отбора и комиссии", mismatch = "у головы очереди сигнал против", toxic = "токсичный поток (VPIN/волатильность)",
+    trend = "тренд: пары не ставим", costs = "захват 1 тик меньше комиссии", var_cap = "лимит позиции по VaR",
+    warmup = "модель прогревается", no_fair = "нет справедливой цены", nofair = "нет справедливой цены",
+    no_price_confirm = "цена не подтверждает", spread = "широкий спред", hard_stop = "жёсткий стоп",
   }
   local function why(w) return WHY[w] or tostring(w or "") end
-  local SETUP = { PAIR = "пара в дырке 3+", TIGHT = "пара у рынка", FADE = "ловля выноса", WALL = "у стены", ADOPT = "принятая позиция" }
+  local SETUP = { PAIR = "пара в дырке 3+", TIGHT = "пара у рынка", FADE = "ловля выноса", WALL = "у стены", ADOPT = "принятая позиция",
+                  MM = "маркет-мейкер GLT", MOMO = "импульс CVD", SQZ = "пробой Кельтнера", NEWS = "пробой новости" }
   local PHASE = { ENTRY = "заявки", TP = "тейк", DECAY = "тейк↓", HOLD = "+1 тик", BE = "безубыток", STOP = "СТОП",
-                  CLOSE = "закрытие", POS = "позиция", HARD = "ЖЁСТКИЙ СТОП" }
+                  CLOSE = "закрытие", POS = "позиция", HARD = "ЖЁСТКИЙ СТОП", AS = "выход A-S" }
 
   local function phase(inst, t)
     if SC.O.halt then return "ОСТАНОВЛЕН", CL.red end
@@ -140,10 +145,13 @@ return function(SC)
     no_room = "мало места", ref_confirms = "BR за выносом", max_pos = "лимит позиции", tx_limit = "лимит tx",
     sharp_move = "резкое движ.", hard_stop = "жёсткий стоп", hole1_volumes = "объёмы < 1.4", hole0_no_wall = "нет стен",
     hole0_volumes = "стены < x3", hole2_off = "выкл", self_cross = "против своей", cmd_pause = "пауза (команда)",
+    edge = "нет перевеса", mismatch = "сигнал против", toxic = "токсично", trend = "тренд", costs = "комиссия > 1 тика",
+    var_cap = "лимит VaR", warmup = "прогрев", no_price_confirm = "нет подтвержд.",
   }
   local function reason(inst, name)
     local mode = (inst.P.SETUPS or {})[name]
     if not mode or mode == "off" then return "выкл" end
+    if SC.G.is_demoted(inst, name) then return "ВИРТ: убыточен" end
     local g = inst.gate and inst.gate[name]
     local w = (g and g ~= "") and g or (inst.skip and inst.skip[name])
     if not w then return "ждёт" end
@@ -168,8 +176,10 @@ return function(SC)
   ------------------------------------------------------------------
   local MAIN_COLS = { "Инструмент", "Фаза", "Бид / Аск", "Спред", "Дисбаланс", "BR, тиков", "Спред 3+ сейчас",
                       "Спредов 3+ за день (снятие/вынос)", "Позиция реал/вирт", "Итог реал, руб",
-                      "Встречные, руб", "Открытые нетто, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL" }
-  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 12, 13, 15, 14, 12, 15, 15, 15, 15 }
+                      "Встречные, руб", "Открытые нетто, руб", "Реал + открытые", "Итог вирт, руб", "TIGHT", "PAIR 3+", "FADE", "WALL",
+                      "Рынок: режим, VPIN, sigma", "Справедл. - середина", "MM" }
+  local MAIN_W = { 10, 18, 15, 7, 10, 10, 16, 12, 12, 12, 13, 15, 14, 12, 15, 15, 15, 15, 22, 12, 15 }
+  local REGIME = { MR = "спокойно", UP = "ТРЕНД ВВЕРХ", DN = "ТРЕНД ВНИЗ", TOXIC = "ТОКСИЧНО" }
 
   -- нереализованный результат реальных позиций по середине спреда (висящие тейки)
   -- Висящие позиции. Лонги и шорты разных циклов на бирже взаимно закрыты (позиция счёта - нетто), поэтому:
@@ -200,8 +210,8 @@ return function(SC)
   local ST_COLS = { "Инструмент", "Сетап", "Режим", "Поставлено", "Отказ BoC", "Снято", "Исполнено", "Пара: обе ноги",
                     "Приб./убыт.", "Доля приб.", "Итог, тиков", "Итог, руб", "Тиков на цикл", "Фазы выхода",
                     "Маркаут 1/5/30 с", "Почему снимали" }
-  local ST_W = { 10, 16, 9, 11, 10, 8, 10, 12, 11, 10, 11, 10, 12, 30, 18, 40 }
-  local ST_N = 12
+  local ST_W = { 10, 18, 9, 11, 10, 8, 10, 12, 11, 18, 11, 10, 12, 30, 18, 40 }
+  local ST_N = 20
   local TR_COLS = { "Время", "Инструмент", "Цикл №", "Сетап", "Реал/вирт", "Направление", "Кол-во", "Цена", "Роль",
                     "Вход цикла", "Позиция цикла", "Итог цикла, тиков", "Итог цикла, руб" }
   local TR_W = { 12, 10, 8, 16, 10, 12, 7, 10, 9, 11, 12, 15, 14 }
@@ -211,7 +221,7 @@ return function(SC)
     if SC.cfg.SHOW_TABLE == false or not api() or (SC.clock and not SC.ui_test) then return end
     local ok, err = pcall(function()
       local n = #SC.insts
-      make("main", SC.name ~= "scalp" and SC.name or "Скальпер", MAIN_COLS, MAIN_W, n + 1, 10, 10, 1500, 70 + 22 * (n + 1))
+      make("main", SC.name ~= "scalp" and SC.name or "Скальпер", MAIN_COLS, MAIN_W, n + 1, 10, 10, 1800, 70 + 22 * (n + 1))
       if SC.cfg.SHOW_STATS ~= false then
         make("stats", "Скальпер: сетапы (за день)", ST_COLS, ST_W, ST_N, 10, 110 + 22 * (n + 1), 1500, 60 + 22 * ST_N)
       end
@@ -264,6 +274,10 @@ return function(SC)
         string.format("%d / %d", SC.C.position(inst, "real"), SC.C.position(inst, "virtual")),
         money(pr), money(lk), money(op), money(pr + un), money(pv),
         reason(inst, "TIGHT"), reason(inst, "PAIR"), reason(inst, "FADE"), reason(inst, "WALL"),
+        inst.A and string.format("%s z%+.1f, %s, %s", REGIME[inst.A.regime] or inst.A.regime, inst.A.z or 0,
+          inst.A.vpin and string.format("VPIN %.2f", inst.A.vpin) or "VPIN -", SC.A.sigma(inst) and string.format("s %.2f", SC.A.sigma(inst)) or "s -") or "",
+        (inst.A and inst.A.fair and s.valid) and string.format("%+.2f", inst.A.fair - s.mid) or "-",
+        reason(inst, "MM"),
       }
       if inst.skip then inst.skip = {} end
       for col, v in ipairs(vals) do set("main", i, col, v) end
@@ -274,6 +288,8 @@ return function(SC)
       color("main", i, 12, nil, sgn_color(op))
       color("main", i, 13, (pr + un) < 0 and CL.red or nil, sgn_color(pr + un))
       color("main", i, 14, nil, sgn_color(pv))
+      local rg = inst.A and inst.A.regime
+      color("main", i, 19, (rg == "TOXIC" and CL.red) or ((rg == "UP" or rg == "DN") and CL.yellow) or nil)
     end
     local st = SC.O.stats
     set("main", n + 1, 1, "ВСЕГО")
@@ -308,7 +324,7 @@ return function(SC)
       if a then
         local n = a.wins + a.losses + a.flat
         local ph = {}
-        for _, p in ipairs({ "TP", "DECAY", "HOLD", "BE", "STOP", "HARD" }) do
+        for _, p in ipairs({ "TP", "AS", "DECAY", "HOLD", "BE", "STOP", "HARD" }) do
           if a.phase[p] then ph[#ph + 1] = (PHASE[p] or p) .. " " .. a.phase[p] end
         end
         local rs = {}
@@ -316,10 +332,12 @@ return function(SC)
         table.sort(rs, function(x, y) return x[2] > y[2] end)
         local rt = {}
         for j = 1, math.min(3, #rs) do rt[#rt + 1] = why(rs[j][1]) .. " " .. rs[j][2] end
+        local p, pstar = SC.ST.breakeven(a)
         local vals = {
           a.sec, SETUP[a.setup] or a.setup, a.backend == "real" and "реал" or "вирт",
           a.open, a.rej_boc, a.nofill, a.filled, a.both,
-          string.format("%d / %d", a.wins, a.losses), n > 0 and string.format("%.0f%%", 100 * a.wins / n) or "-",
+          string.format("%d / %d", a.wins, a.losses),
+          p and (string.format("%.0f%%", 100 * p) .. (pstar and string.format(" (нужно %.0f%%)", 100 * pstar) or "")) or "-",
           string.format("%+.1f", a.ticks), money(a.rub), n > 0 and string.format("%+.2f", a.ticks / n) or "-",
           table.concat(ph, ", "),
           a.mk_n > 0 and string.format("%+.1f / %+.1f / %+.1f", a.mk[1] / a.mk_n, a.mk[2] / a.mk_n, a.mk[3] / a.mk_n) or "-",
@@ -328,6 +346,7 @@ return function(SC)
         for col, v in ipairs(vals) do set("stats", i, col, v) end
         color("stats", i, 3, a.backend == "real" and CL.green or CL.grey)
         color("stats", i, 12, nil, sgn_color(a.rub))
+        color("stats", i, 10, (p and pstar and p < pstar) and CL.red or nil)
       else
         for col = 1, #ST_COLS do set("stats", i, col, "") end
       end

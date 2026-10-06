@@ -5,6 +5,13 @@
 --   POS    - есть позиция. Входные заявки в сторону набора снимаются; заявка в сторону закрытия (у PAIR -
 --            вторая нога) становится выходом. Выход только пассивный, цена - по фазам (TP/DECAY/HOLD/BE/STOP).
 --            Выход переставляется только после ПОДТВЕРЖДЁННОГО снятия старого (двойного исполнения нет).
+--            Режим выхода (EXIT_MODE, у сетапа может быть свой):
+--              "AS"     - цена закрывающей стороны котировки Авелланеды-Стойкова / GLT по СУММАРНОЙ позиции
+--                         инструмента (mm.lua): не жаднее цели, при росте позиции и уходе справедливой цены -
+--                         ближе к рынку; стоп по волатильности k*sigma*sqrt(H);
+--              "HOLD"   - тейк висит до конца дня (прежний EXIT_HOLD_EOD = true);
+--              "TP"     - тейк висит, выход по сигналу сетапа (exit_check) - импульсные сетапы;
+--              "PHASES" - TP -> DECAY -> HOLD -> BE -> STOP по возрасту позиции.
 --   CLOSE  - позиция 0, снимаем остатки. DONE - всё снято, всё учтено.
 return function(SC)
   local C = {}
@@ -38,13 +45,14 @@ return function(SC)
     local c = { id = next_id, inst = inst, setup = spec.setup, backend = spec.backend, t0 = t,
                 state = "ENTRY", orders = {}, legs = {}, pos = 0, avg = nil, realized = 0, traded = 0,
                 pair = spec.pair, tp_fn = spec.tp, info = spec.info or {}, fills = {}, phase = nil,
-                n_filled_legs = 0 }
+                n_filled_legs = 0, exit_mode = spec.exit_mode, exit_check = spec.exit_check, no_guard = spec.taker }
     C.list[#C.list + 1] = c
     for _, l in ipairs(spec.legs) do
-      local o = SC.O.place(inst, spec.backend, l.side, l.px, l.qty, c, "entry", t)
+      local o = SC.O.place(inst, spec.backend, l.side, l.px, l.qty, c, "entry", t, l.taker)
       c.orders[#c.orders + 1] = o
       c.legs[#c.legs + 1] = o
     end
+    SC.G.on_open(c, t)
     SC.ST.on_open(c)
     U.dbg(string.format("[%s] CYCLE %d open %s/%s legs=%d", inst.sec, c.id, c.setup, c.backend, #spec.legs))
     return c
@@ -103,6 +111,7 @@ return function(SC)
       apply_fill(c, o.side, q, px, t)
       c.fills[#c.fills + 1] = { t = t, side = o.side, q = q, px = px, role = o.role }
       SC.ST.on_fill(c, o, q, px, t)
+      SC.G.on_fill(c, o, q, px, t)
       if o.taker then
         c.taker_fee = (c.taker_fee or 0) + px * (c.inst.step_price or 0) * q * (c.inst.P.TAKER_FEE_PCT or 0) / 100
       end
@@ -173,13 +182,21 @@ return function(SC)
     if c.pos > 0 then return s.bb + 1 else return s.ba - 1 end
   end
 
+  function C.mode(c)
+    local m = c.exit_mode or c.inst.P.EXIT_MODE
+    if not m then m = c.inst.P.EXIT_HOLD_EOD and "HOLD" or "PHASES" end
+    return m
+  end
+
   function C.exit_price(c, t)
     local inst, P, s = c.inst, c.inst.P, c.inst.sig
     local long = c.pos > 0
     local age = t - (c.t_pos or t)
     local avg = c.avg
     local adverse = long and (avg - s.mid) or (s.mid - avg)
-    if adverse >= P.STOP_TICKS then
+    local mode = C.mode(c)
+    local hold = (mode == "HOLD" or mode == "TP")
+    if adverse >= SC.R.stop_ticks(inst) then
       c.t_adv = c.t_adv or t
     else
       c.t_adv = nil
@@ -191,11 +208,11 @@ return function(SC)
       U.log(string.format("[%s] cycle %d: price %.2f%% against entry %s - SOFT STOP, closing passively", inst.sec, c.id,
         100 * adverse / avg, inst:price_str(avg)))
     end
-    if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and not c.tp_px and avg then
+    if hold and not c.force_stop and not c.stop_since and not c.tp_px and avg then
       -- цели нет (переворот позиции, восстановление без второй ноги): +MIN_PROFIT от входа, но НЕ в убыток
       c.tp_px = long and ceil(avg + P.MIN_PROFIT_TICKS - 1e-9) or floor(avg - P.MIN_PROFIT_TICKS + 1e-9)
     end
-    if P.EXIT_HOLD_EOD and not c.force_stop and not c.stop_since and c.tp_px then
+    if hold and not c.force_stop and not c.stop_since and c.tp_px then
       -- выход висит на цели до конца дня (принудительно - только конец окна / лимит дня / flatten)
       local px = c.tp_px
       local bp = best_passive(c)
@@ -203,9 +220,25 @@ return function(SC)
       if (not long) and px > bp then px = bp end
       return px, "TP"
     end
-    if c.stop_since or c.force_stop or (c.t_adv and t - c.t_adv >= P.STOP_CONFIRM_SEC) or age >= P.MAX_HOLD_SEC then
+    local max_hold = (mode == "AS") and P.AS_MAX_HOLD_SEC or P.MAX_HOLD_SEC
+    if c.stop_since or c.force_stop or (c.t_adv and t - c.t_adv >= P.STOP_CONFIRM_SEC) or (max_hold > 0 and age >= max_hold) then
       phase = "STOP"
-      c.stop_since = c.stop_since or t          -- STOP не отменяется, даже если цена вернулась
+      if not c.stop_since then
+        c.stop_since = t                          -- STOP не отменяется, даже если цена вернулась
+        c.stop_reason = c.stop_reason or (c.force_stop and "force") or (c.t_adv and "vol_stop") or "max_hold"
+      end
+    elseif mode == "AS" then
+      -- Авелланеда-Стойков / GLT: закрывающая сторона котировки по суммарной позиции, не жаднее цели
+      local qx = SC.M.exit_quote(inst, c, t)
+      local px = c.tp_px or qx
+      if qx then
+        if long then px = math.min(px, qx) else px = math.max(px, qx) end
+      end
+      if not px then px = long and ceil(avg + P.MIN_PROFIT_TICKS - 1e-9) or floor(avg - P.MIN_PROFIT_TICKS + 1e-9) end
+      local bp = best_passive(c)
+      if long and px < bp then px = bp end
+      if (not long) and px > bp then px = bp end
+      return px, "AS"
     elseif age < P.TP_HOLD_SEC and c.tp_px then phase = "TP"
     elseif age < P.BE_SEC then phase = "DECAY"
     elseif age < P.SCRATCH_SEC then phase = "HOLD"
@@ -252,11 +285,21 @@ return function(SC)
     -- POS
     if not inst.sig.valid then return end
     if SC.R.force_exit(inst, c, t) then c.force_stop = true end
+    -- выход по сигналу сетапа (импульсные: тайм-стоп, затухание, возврат в диапазон) - тейкером
+    if c.exit_check and not c.hard then
+      local why = c.exit_check(c, t)
+      if why then
+        c.hard = t
+        c.hard_why = why
+        U.log(string.format("[%s] %s cycle %d: exit signal '%s' - closing by market", inst.sec, c.setup, c.id, why))
+      end
+    end
     -- ЖЁСТКИЙ СТОП: цена ушла против на HARD_STOP_PCT % -> тейк-заявка по рынку
     local s = inst.sig
     local adv = (c.pos > 0) and (c.avg - s.mid) or (s.mid - c.avg)
     if not c.hard and (P.HARD_STOP_PCT or 0) > 0 and c.avg and adv >= c.avg * P.HARD_STOP_PCT / 100 then
       c.hard = t
+      c.hard_why = "pct"
       U.log(string.format("[%s] cycle %d: price %.2f%% against entry %s - HARD STOP, closing by market", inst.sec,
         c.id, 100 * adv / c.avg, inst:price_str(c.avg)))
     end
@@ -300,6 +343,13 @@ return function(SC)
       if not need_move and e.px ~= px then
         local interval = (phase == "STOP") and P.EXIT_REQUOTE_SEC or 0.3
         if phase == "TP" and e.px == c.tp_px then interval = 1e9 end
+        if phase == "AS" then
+          -- каждая перестановка - в конец очереди: двигаем, только если нужно ближе к рынку
+          -- или цель ушла дальше чем на AS_REQUOTE_TOL тиков
+          interval = P.AS_REQUOTE_SEC
+          local closer = (side == "S" and px < e.px) or (side == "B" and px > e.px)
+          if not closer and math.abs(px - e.px) < P.AS_REQUOTE_TOL then interval = 1e9 end
+        end
         -- выход лучше нужного для нас (например, висячая нога пары) не трогаем, пока фаза TP
         if t - (c.t_exit or c.t0) >= interval then need_move = true end
       end

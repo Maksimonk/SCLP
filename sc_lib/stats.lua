@@ -14,7 +14,7 @@ return function(SC)
     local a = ST.agg[k]
     if not a then
       a = { sec = c.inst.sec, setup = c.setup, backend = c.backend, open = 0, rej_boc = 0, rej_other = 0,
-            nofill = 0, filled = 0, both = 0, wins = 0, losses = 0, flat = 0, ticks = 0, rub = 0,
+            nofill = 0, filled = 0, both = 0, wins = 0, losses = 0, flat = 0, ticks = 0, rub = 0, win_ticks = 0, loss_ticks = 0,
             cancel = {}, phase = {}, mk = { 0, 0, 0 }, mk_n = 0 }
       ST.agg[k] = a
     end
@@ -83,6 +83,8 @@ return function(SC)
     end
     local per_lot = c.realized / math.max(1, c.traded / 2)
     if c.realized > 0 then a.wins = a.wins + 1 elseif c.realized < 0 then a.losses = a.losses + 1 else a.flat = a.flat + 1 end
+    if c.realized > 0 then a.win_ticks = (a.win_ticks or 0) + c.realized
+    elseif c.realized < 0 then a.loss_ticks = (a.loss_ticks or 0) - c.realized end
     a.ticks = a.ticks + c.realized
     local rub = SC.R.cycle_rub(c)
     a.rub = a.rub + rub
@@ -105,6 +107,16 @@ return function(SC)
       entry and inst:price_str(entry.px) or "?", last and inst:price_str(last.px) or "?", c.realized, rub, ph))
   end
 
+  -- доля прибыльных: факт и безубыточная p* = L / (W + L) (W, L - средние выигрыш и проигрыш, тиков)
+  function ST.breakeven(a)
+    local n = a.wins + a.losses + a.flat
+    if n == 0 then return nil end
+    local p = a.wins / n
+    if a.wins == 0 or a.losses == 0 then return p, nil end
+    local W, L = (a.win_ticks or 0) / a.wins, (a.loss_ticks or 0) / a.losses
+    return p, L / (W + L), W, L
+  end
+
   local last_hb
   function ST.summary()
     local lines = {}
@@ -120,9 +132,11 @@ return function(SC)
       local rs = {}
       for i = 1, math.min(4, #reasons) do rs[#rs + 1] = reasons[i][1] .. ":" .. reasons[i][2] end
       local mk = a.mk_n > 0 and string.format(" mk1/5/30 %+.2f/%+.2f/%+.2f", a.mk[1] / a.mk_n, a.mk[2] / a.mk_n, a.mk[3] / a.mk_n) or ""
-      lines[#lines + 1] = string.format("%s %s/%s: open %d, boc-rej %d, nofill %d [%s], filled %d (pair both %d), win %d/%d, %+.1f ticks, %+.0f RUB%s",
+      local p, pstar, W, L = ST.breakeven(a)
+      local be = pstar and string.format(" | win%% %.0f vs break-even %.0f (avg +%.1f / -%.1f)", 100 * p, 100 * pstar, W, L) or ""
+      lines[#lines + 1] = string.format("%s %s/%s: open %d, boc-rej %d, nofill %d [%s], filled %d (pair both %d), win %d/%d, %+.1f ticks, %+.0f RUB%s%s",
         a.sec, a.setup, a.backend, a.open, a.rej_boc, a.nofill, table.concat(rs, " "), a.filled, a.both,
-        a.wins, n, a.ticks, a.rub, mk)
+        a.wins, n, a.ticks, a.rub, mk, be)
     end
     return lines
   end
@@ -142,6 +156,7 @@ return function(SC)
         collectgarbage("count"), #SC.C.list, n_idx,
         SC.O.halt and (" | HALT: " .. SC.O.halt) or ""))
       for _, l in ipairs(ST.summary()) do U.log("  " .. l) end
+      for _, l in ipairs(ST.alpha_lines(t)) do U.log("  " .. l) end
       for sec, setups in pairs(SC.S.why_not) do
         for name, reasons in pairs(setups) do
           local r = {}
@@ -154,6 +169,33 @@ return function(SC)
       end
       SC.S.why_not = {}
     end
+  end
+
+  -- состояние модели по инструментам: волатильность, режим, VPIN, A/k, справедливая цена, обучение, пороги риска
+  local function D(x) return x and U.fmt(x, 2) or "-" end
+  function ST.alpha_lines(t)
+    local r = {}
+    for _, inst in ipairs(SC.insts) do
+      local a, s = inst.A, inst.sig
+      if a and s.valid then
+        local fair = SC.A.fair(inst, t)
+        local pt = a.parts or {}
+        local A_, k_ = SC.A.ak(inst, t)
+        local l = SC.A.L(inst)
+        local cells, learned = 0, 0
+        for _, c in pairs(l.micro) do cells = cells + 1; if c.n >= inst.P.MICRO_MIN_N then learned = learned + 1 end end
+        local kf, kl = SC.A.coefs(inst)
+        r[#r + 1] = string.format("ALPHA %s: sigma %s t/sqrt(s), regime %s z %+.1f, VPIN %s (crit %s), A %s k %s, " ..
+          "fair-mid %+.2f (G %+.2f flow %+.2f lead %+.2f), micro cells %d/%d learned, kf %.2f kl %.2f | " ..
+          "cost %.2f t/side, min capture %d, q_max(MM) %s, pos cap %d, stop %d t",
+          inst.sec, D(SC.A.sigma(inst)), a.regime, a.z or 0, D(a.vpin), D(SC.A.vpin_crit(inst)), D(A_), D(k_), (fair or s.mid) - s.mid, pt.g or 0, pt.flow or 0, pt.lead or 0,
+          learned, cells, kf, kl, SC.R.cost_ticks(inst), SC.R.min_capture(inst), tostring(SC.M.qmax(inst, t)),
+          SC.R.pos_cap(inst, "real"), SC.R.stop_ticks(inst))
+      end
+    end
+    for _, l in ipairs(SC.G.summary()) do r[#r + 1] = "adverse selection " .. l end
+    for k, why in pairs(SC.G.demoted) do r[#r + 1] = "DEMOTED to virtual: " .. k .. " (" .. why .. ")" end
+    return r
   end
 
   function ST.final(t)

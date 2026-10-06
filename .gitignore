@@ -6,6 +6,8 @@ scalp_fills_*.csv
 rec_scalp_*.csv
 scalp_state.txt
 scalp_state.txt.tmp
+scalp_alpha.txt
+scalp_alpha.txt.tmp
 probe_passive_*.txt
 tools/test_out/
 __pycache__/

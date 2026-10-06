@@ -13,15 +13,18 @@ local function base_cfg(over)
   local c = {
     MODE = "LIVE", ACCOUNT = "TEST01", HEARTBEAT_SEC = 3600, SHOW_TABLE = false,
     SESSIONS = { { "09:00:30", "23:49:00", true, 1800, 600 } }, SESSIONS_WEEKEND = {},
-    DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 1, EXIT_HOLD_EOD = false, MAX_REAL_CYCLES = 1 },
-    INSTRUMENTS = { { BASE = "BM", REF = { BASE = "BR" }, SETUPS = { PAIR = "live", TIGHT = "off", FADE = "paper", WALL = "off" } } },
+    -- механика прежних сценариев: без фильтра отбора и режима рынка (они проверяются отдельно, TEST 40+)
+    DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 1, EXIT_HOLD_EOD = false, MAX_REAL_CYCLES = 1, GUARD_EDGE = false, REGIME_GATE = false },
+    INSTRUMENTS = { { BASE = "BM", REF = { BASE = "BR" }, SETUPS = { PAIR = "live", TIGHT = "off", FADE = "paper", WALL = "off",
+                                                                    MM = "off", MOMO = "off", SQZ = "off", NEWS = "off" } } },
   }
   for k, v in pairs(over or {}) do c[k] = v end
   return c
 end
 
 local function fresh(cfg, keep_state)
-  if not keep_state then os.remove(OUT .. "/scalp_state.txt") end
+  if SC and SC.U then SC.U.close_all() end     -- журналы прежнего экземпляра робота закрыть (иначе строки CSV перемешаются)
+  if not keep_state then os.remove(OUT .. "/scalp_state.txt"); os.remove(OUT .. "/scalp_alpha.txt") end
   SC = { dir = DIR, out_dir = OUT, config_override = cfg }
   SC.clock = function() return SIM.t end
   dofile(DIR .. "/tools/sim_quik.lua")
@@ -224,7 +227,7 @@ check(#real_orders(false) == 0, "no pair while BR moves")
 ------------------------------------------------------------------
 print("TEST 11: partial fill of a 2-lot pair leg -> exit sized to the position")
 local cfg11 = base_cfg()
-cfg11.DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 2, EXIT_HOLD_EOD = false }
+cfg11.DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 2, EXIT_HOLD_EOD = false, GUARD_EDGE = false, REGIME_GATE = false }
 fresh(cfg11)
 quiet_gap()
 SIM.run(0.3)
@@ -272,8 +275,8 @@ check(cyc("PAIR", "virtual") ~= nil, "pair runs virtually")
 ------------------------------------------------------------------
 local function tight_cfg(over)
   local c = base_cfg()
-  c.INSTRUMENTS[1].SETUPS = { PAIR = "off", TIGHT = "live", FADE = "off", WALL = "off" }
-  c.DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 1, EXIT_HOLD_EOD = true }
+  c.INSTRUMENTS[1].SETUPS = { PAIR = "off", TIGHT = "live", FADE = "off", WALL = "off", MM = "off", MOMO = "off", SQZ = "off" }
+  c.DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 1, EXIT_HOLD_EOD = true, GUARD_EDGE = false, REGIME_GATE = false }
   for k, v in pairs(over or {}) do c.DEFAULTS[k] = v end
   return c
 end
@@ -476,12 +479,12 @@ check((SIM.taker_fills or 0) == 0, "no taker fills from passive orders")
 print("TEST 29: several instruments; reference in other units (index LAST) measured in percent")
 local cfg29 = base_cfg()
 cfg29.INSTRUMENTS = {
-  { BASE = "BM", REF = { BASE = "BR" }, MAX_POS = 10, SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off" } },
+  { BASE = "BM", REF = { BASE = "BR" }, MAX_POS = 10, SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off", MM = "off", MOMO = "off", SQZ = "off" } },
   { SEC = "IMOEXF", REF = { SEC = "IMOEX", CLASS = "SNDX", SOURCE = "last" }, MAX_POS = 10,
-    SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off" } },
+    SETUPS = { TIGHT = "live", PAIR = "off", FADE = "off", WALL = "off", MM = "off", MOMO = "off", SQZ = "off" } },
 }
 SC = { dir = DIR, out_dir = OUT, config_override = cfg29 }
-os.remove(OUT .. "/scalp_state.txt")
+os.remove(OUT .. "/scalp_state.txt"); os.remove(OUT .. "/scalp_alpha.txt")
 SC.clock = function() return SIM.t end
 dofile(DIR .. "/tools/sim_quik.lua")
 dofile(DIR .. "/scalp.lua")
@@ -522,10 +525,294 @@ for _, o in ipairs(real_orders(true)) do if o.side == "S" and o.px == 10001 then
 check(sells30 == 0, "old take-profit not re-placed")
 
 ------------------------------------------------------------------
+-- НОВЫЕ МОДУЛИ: справедливая цена, маркет-мейкинг, фильтр отбора, риск, импульсные сетапы
+------------------------------------------------------------------
+local function cfg_new(defaults, setups)
+  local c = base_cfg()
+  c.DEFAULTS = { MAX_POS = 2, QUOTE_SIZE = 1, MAX_REAL_CYCLES = 1 }
+  for k, v in pairs(defaults or {}) do c.DEFAULTS[k] = v end
+  c.INSTRUMENTS[1].SETUPS = { PAIR = "off", TIGHT = "off", FADE = "off", WALL = "off", MM = "off", MOMO = "off", SQZ = "off", NEWS = "off" }
+  for k, v in pairs(setups or {}) do c.INSTRUMENTS[1].SETUPS[k] = v end
+  return c
+end
+local function bm() return SC.by_sec.BMX6 end
+local function sigma_ready(sig2)          -- задать оценку волатильности (тиков^2/с)
+  local a = bm().A
+  a.sig2, a.sig2f, a.n_vs = sig2, sig2, 30
+end
+local abs = math.abs
+
+print("TEST 40: Avellaneda-Stoikov / Gueant-Lehalle-Tapia formulas")
+fresh(cfg_new({ MAX_POS = 5, MM_AK_FIXED = true, MM_A = 1.0, MM_K = 1.5, MM_GAMMA = 0.1, SIGMA_DEFAULT = 0.5 }))
+local db0, da0, base0, C0 = SC.M.deltas(bm(), 0, SIM.t)
+local base_x = (1 / 0.1) * math.log(1 + 0.1 / 1.5)
+local C_x = math.sqrt(0.25 * 0.1 / (2 * 1.5 * 1.0) * (1 + 0.1 / 1.5) ^ (1 + 1.5 / 0.1))
+check(abs(base0 - base_x) < 1e-9 and abs(C0 - C_x) < 1e-9, string.format("GLT base %.4f C %.4f", base0, C0))
+check(abs(db0 - da0) < 1e-9 and abs(db0 - (base_x + C_x / 2)) < 1e-9, "q = 0: symmetric quotes, delta = base + C/2")
+local db2, da2 = SC.M.deltas(bm(), 2, SIM.t)
+check(abs((db2 - db0) - 2 * C_x) < 1e-9 and abs((da0 - da2) - 2 * C_x) < 1e-9, "long 2: bid 2C further, ask 2C closer")
+check(SC.M.qmax(bm(), SIM.t) == math.floor(base_x / C_x), "q_max = floor(base / C) = " .. SC.M.qmax(bm(), SIM.t))
+bm().P.MM_MODEL = "AS"
+local r = SC.M.reservation(bm(), 2, 7000, SIM.t)
+check(abs(r - (7000 - 2 * 0.1 * 0.25 * 30)) < 1e-9, "A-S reservation r = s - q*gamma*sigma^2*tau, got " .. r)
+bm().P.MM_MODEL = "GLT"
+
+print("TEST 41: OBI over k levels and micro-price")
+fresh(cfg_new())
+check(abs(SC.A.obi(bm(), 5)) < 1e-9, "symmetric book -> OBI_5 = 0")
+SIM.set("BMX6", "B", 7000, 30)
+SIM.run(0.05)
+check(abs(SC.A.obi(bm(), 5) - 20 / 154) < 1e-9, "OBI_5 = (87 - 67) / 154, got " .. SC.A.obi(bm(), 5))
+check(abs(SC.A.micro(bm()) - 7000.75) < 1e-9, "P_micro = (30*70.01 + 10*70.00) / 40 = 70.0075, got " .. SC.A.micro(bm()))
+check(abs(SC.A.fair(bm(), SIM.t) - 7000.75) < 1e-9, "fair = micro before learning (no flow, no lead)")
+
+print("TEST 42: edge filter blocks a pair that loses after adverse selection; costs raise the minimum capture")
+fresh(cfg_new(nil, { PAIR = "live" }))
+quiet_gap()
+SIM.run(0.5)
+check(#real_orders(false) == 0, "pair 70.01/70.02 around fair 70.012: bid edge 0.2 - 0.25 < 0 -> not placed")
+fresh(cfg_new({ AS_PRIOR_TICKS = 0 }, { PAIR = "live" }))
+quiet_gap()
+SIM.run(0.5)
+check(#real_orders(true) == 2, "without the adverse-selection prior the same pair is placed")
+fresh(cfg_new({ BROKER_FEE_RUB = 0.5 }, { TIGHT = "live" }))
+check(abs(SC.R.cost_ticks(bm()) - 0.625) < 1e-9 and SC.R.min_capture(bm()) == 2, "fee 0.5 RUB / tick 0.8 RUB = 0.625 tick per side -> min capture 2")
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 5 }, { 10003, 30 } })
+SIM.run(0.5)
+check(#real_orders(false) == 0 and (bm().skip or {}).TIGHT == "costs", "TIGHT (1 tick) disabled when costs exceed it")
+
+print("TEST 43: Cancel-on-Mismatch - resting entry cancelled when the signal turns against it")
+fresh(cfg_new({ AS_PRIOR_TICKS = 0 }, { TIGHT = "live" }))
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 5 }, { 10003, 30 } })
+SIM.run(0.5)
+check(#real_orders(true) == 2, "TIGHT pair 100.00/100.01 resting")
+local c43 = SC.C.list[1]
+SIM.set("BMX6", "S", 10002, 200)                 -- огромный аск: fair -> 99.99, бид 100.00 теперь в минус
+SIM.run(0.5)
+check(#real_orders(true) == 0, "pair cancelled")
+local why43 = c43 and c43.cancel_why
+check(why43 == "edge" or why43 == "mismatch", "cancel reason edge/mismatch, got " .. tostring(why43))
+fresh(cfg_new({ AS_PRIOR_TICKS = 0 }, { TIGHT = "live" }))
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 5 }, { 10003, 30 } })
+SIM.run(0.5)
+c43 = SC.C.list[1]
+SIM.set("BMX6", "S", 10002, 12)                  -- fair 99.9988: бид в голове очереди с edge -0.12
+SIM.run(0.5)
+check(c43 and c43.cancel_why == "mismatch", "head of queue + small negative edge -> mismatch, got " .. tostring(c43 and c43.cancel_why))
+
+print("TEST 44: queue position tracking (trades and cancels ahead of us)")
+fresh(cfg_new({ AS_PRIOR_TICKS = 0, QUEUE_CANCEL = false }, { TIGHT = "live" }))
+SIM.book("BMX6", { { 9999, 20 }, { 9998, 800 } }, { { 10000, 100 }, { 10001, 1000 } })
+SIM.run(0.5)
+local ob
+for _, o in ipairs(SC.O.all_live(bm(), "real")) do if o.side == "B" then ob = o end end
+check(ob and ob.q_ahead == 20, "joined the bid queue behind 20 lots, got " .. tostring(ob and ob.q_ahead))
+SIM.trade("BMX6", -1, 9999, 5)
+SIM.run(0.1)
+check(ob and ob.q_ahead == 15, "5 traded ahead -> 15, got " .. tostring(ob and ob.q_ahead))
+SIM.set("BMX6", "B", 9999, 5)                    -- 10 сняли (без сделок)
+SIM.run(0.1)
+check(ob and ob.q_ahead == 5, "10 cancelled, all of them ahead -> 5, got " .. tostring(ob and ob.q_ahead))
+
+print("TEST 45: AS exit follows the reservation price down instead of hanging; never crosses")
+fresh(cfg_new({ AS_PRIOR_TICKS = 0, EXIT_MODE = "AS", GUARD_EDGE = false }, { TIGHT = "live" }))
+SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 5 }, { 10003, 30 } })
+SIM.run(0.5)
+SIM.trade("BMX6", -1, 10000, 1)                  -- лонг 100.00, тейк 100.01
+SIM.run(0.5)
+check(SC.C.position(bm(), "real") == 1, "long 1")
+SIM.book("BMX6", { { 9996, 5 }, { 9995, 30 } }, { { 9998, 5 }, { 9999, 30 } })   -- рынок -3 тика
+local crossed45 = false
+for _ = 1, 40 do
+  SIM.run(0.05)
+  for _, o in ipairs(real_orders(true)) do if o.side == "S" and o.px <= (SIM.best("BMX6", "B") or 0) then crossed45 = true end end
+end
+local ex45
+for _, o in ipairs(real_orders(true)) do if o.side == "S" then ex45 = o end end
+check(ex45 and ex45.px == 9998, "exit moved from 100.01 to the AS ask 99.98, got " .. tostring(ex45 and ex45.px))
+check(not crossed45, "exit never at/through the best bid")
+SIM.trade("BMX6", 1, 9998, 6)
+SIM.run(0.3)
+check(SC.C.position(bm(), "real") == 0 and math.abs((agg("TIGHT", "real").ticks or 0) + 2) < 1e-9,
+  "closed -2 ticks instead of hanging to the end of the day, got " .. tostring(agg("TIGHT", "real").ticks))
+
+print("TEST 46: inventory skew - long position moves both quotes down")
+fresh(cfg_new({ MAX_POS = 5, MM_AK_FIXED = true }))
+SIM.book("BMX6", { { 9990, 10 } }, { { 10010, 10 } })
+SIM.run(0.1)
+local b0, a0 = SC.M.quotes(bm(), 0, SIM.t)
+local b3, a3 = SC.M.quotes(bm(), 3, SIM.t)
+check(b0 == 9999 and a0 == 10001, "flat: 99.99 / 100.01 around fair 100.00, got " .. tostring(b0) .. "/" .. tostring(a0))
+check(b3 < b0 and a3 <= a0, "long 3: bid " .. tostring(b3) .. " < " .. b0 .. ", ask " .. tostring(a3) .. " <= " .. a0)
+
+print("TEST 47: VPIN from aggressor flags; toxic flow blocks new entries")
+fresh(cfg_new({ VPIN_BUCKET_LOTS = 10, VPIN_N = 10, VPIN_CRIT = 0.6 }))
+sigma_ready(0.25)
+for _ = 1, 100 do SC.A.on_trade(bm(), { p = 7001, q = 1, side = 1 }, SIM.t) end
+check(bm().A.vpin and abs(bm().A.vpin - 1) < 1e-9, "one-sided flow -> VPIN 1, got " .. tostring(bm().A.vpin))
+SIM.run(0.2)
+check(SC.A.regime(bm()) == "TOXIC", "VPIN >= 0.6 -> TOXIC, got " .. SC.A.regime(bm()))
+local ok47, why47 = SC.G.filter(bm(), { setup = "PAIR", pair = true, legs = { { side = "B", px = 7000 }, { side = "S", px = 7001 } } }, SIM.t)
+check(not ok47 and why47 == "toxic", "pair refused: toxic")
+for i = 1, 100 do SC.A.on_trade(bm(), { p = 7001, q = 1, side = (i % 2 == 0) and 1 or -1 }, SIM.t) end
+check(bm().A.vpin < 0.05, "balanced flow -> VPIN ~0, got " .. tostring(bm().A.vpin))
+
+print("TEST 48: trend regime (z >= 2) - no symmetric pairs, MM quotes one side")
+fresh(cfg_new({ AS_PRIOR_TICKS = 0, MM_AK_FIXED = true }, { MM = "live" }))
+sigma_ready(0.25)
+for k = 1, 6 do
+  SIM.book("BMX6", { { 7000 + k, 10 } }, { { 7001 + k, 10 } })
+  SIM.run(1)
+end
+check(SC.A.regime(bm()) == "UP", "+6 ticks in 6 s at sigma 0.5 -> UP, z " .. string.format("%.1f", bm().A.z))
+local ok48, why48 = SC.G.filter(bm(), { setup = "PAIR", pair = true, legs = { { side = "B", px = 7006 }, { side = "S", px = 7007 } } }, SIM.t)
+check(not ok48 and why48 == "trend", "pair refused in a trend")
+local sides48 = {}
+for _, o in ipairs(real_orders(true)) do sides48[o.side] = true end
+check(not sides48.S, "MM: no sell quote against the up-move")
+
+print("TEST 49: setup losing money with significance -> switched to virtual for the day")
+fresh(cfg_new(nil, { TIGHT = "live" }))
+check(SC.S.backend_for(bm(), "TIGHT") == "real", "TIGHT live")
+for i = 1, 20 do SC.G.on_cycle_done({ backend = "real", traded = 2, inst = bm(), setup = "TIGHT" }, -0.8 - (i % 3) * 0.4) end
+check(SC.G.is_demoted(bm(), "TIGHT") and SC.S.backend_for(bm(), "TIGHT") == "virtual", "TIGHT demoted to virtual")
+check(SC.S.backend_for(bm(), "PAIR") == nil, "other setups untouched")
+
+print("TEST 50: MOMO (paper) - CVD velocity burst -> taker entry, time stop -> taker exit, fees counted")
+fresh(cfg_new({ CVD_MIN_N = 40, MOMO_Z = 3, MOMO_HOLD_SEC = 3, MOMO_MIN_HOLD_SEC = 10, MOMO_TP_TICKS = 50, MOMO_STOP_TICKS = 50 },
+  { MOMO = "paper" }))
+for i = 1, 60 do                                  -- спокойный поток в обе стороны
+  SIM.trade("BMX6", (i % 2 == 0) and 1 or -1, (i % 2 == 0) and 7001 or 7000, 1)
+  SIM.book("BMX6", { { 7000, 50 + i % 2 }, { 6999, 50 } }, { { 7001, 50 }, { 7002, 50 } })   -- стакан живой
+  SIM.run(0.25)
+end
+SIM.book("BMX6", { { 7001, 50 }, { 7000, 50 } }, { { 7002, 50 }, { 7003, 50 } })
+SIM.run(0.6)
+for _ = 1, 3 do SIM.trade("BMX6", 1, 7002, 40); SIM.book("BMX6", { { 7002, 50 } }, { { 7003, 50 }, { 7004, 50 } }); SIM.run(0.05) end
+SIM.run(0.3)
+local m50 = cyc("MOMO", "virtual")
+check(m50 and m50.pos == 1, "virtual MOMO long 1")
+SIM.run(4)
+local a50 = agg("MOMO", "virtual")
+check((a50.filled or 0) == 1 and (a50.phase or {}).HARD == 1, "time stop closed by market")
+check((a50.rub or 0) < (a50.ticks or 0) * 0.8, "taker fees in the result")
+check(#SIM.sent == 0, "paper: nothing sent")
+
+print("TEST 51: NEWS - range before the event, OCO breakout, the other side cancelled")
+fresh(cfg_new({ NEWS_TIMES = { "12:06:00" }, NEWS_RANGE_SEC = 300, NEWS_FREEZE_SEC = 10, NEWS_ACTIVE_SEC = 60,
+  NEWS_MIN_RANGE_TICKS = 2, NEWS_SLIP_TICKS = 3, NEWS_TP_K = 5 }, { NEWS = "paper" }))
+local function live_book(b, a, sec)              -- стакан "живой": объём меняется раз в секунду
+  for i = 1, sec do SIM.book("BMX6", { { b, 50 + i % 2 } }, { { a, 50 } }); SIM.run(1) end
+end
+live_book(7000, 7001, 60)
+live_book(6998, 6999, 60)
+live_book(7000, 7001, 240)                       -- до 12:06:05
+check(cyc("NEWS", "virtual") == nil, "no entry inside the range")
+SIM.book("BMX6", { { 7002, 50 } }, { { 7003, 50 } })   -- пробой вверх: high 70.01 + 1 тик
+SIM.run(0.5)
+local n51 = cyc("NEWS", "virtual")
+check(n51 and n51.pos == 1 and n51.avg == 7003, "OCO buy filled at 70.03 (limit 70.05), got " .. tostring(n51 and n51.avg))
+SIM.book("BMX6", { { 6990, 50 } }, { { 6991, 50 } })   -- провал ниже диапазона
+SIM.run(1)
+local a51 = agg("NEWS", "virtual")
+check((a51.open or 0) == 1, "sell side never fired (one-cancels-the-other), cycles " .. tostring(a51.open))
+check((a51.filled or 0) == 1, "long closed by market when price returned into the range")
+
+print("TEST 52: SQZ - Bollinger inside adaptive Keltner, breakout -> taker entry")
+fresh(cfg_new({ SQZ_BAR_SEC = 1, SQZ_EMA_N = 5, SQZ_ATR_N = 5, SQZ_LOOKBACK = 3 }, { SQZ = "paper" }))
+for i = 1, 12 do
+  SIM.book("BMX6", { { 7000, 50 } }, { { (i % 2 == 0) and 7001 or 7002, 50 } })
+  SIM.run(1)
+end
+check(bm().BO and bm().BO.sq[#bm().BO.sq], "squeeze detected")
+SIM.book("BMX6", { { 7004, 50 } }, { { 7005, 50 } })
+SIM.run(0.5)
+local q52 = cyc("SQZ", "virtual")
+check(q52 and q52.pos == 1, "breakout up -> virtual long")
+
+print("TEST 53: iceberg - traded far more than visible, level still there")
+fresh(cfg_new())
+for _ = 1, 4 do SIM.trade("BMX6", -1, 7000, 8); SIM.set("BMX6", "B", 7000, 10); SIM.run(0.2) end
+local ice = bm().A.iceberg
+check(ice and ice.side == "B" and ice.p == 7000, "iceberg on the 70.00 bid")
+
+print("TEST 54: VaR position cap against the remaining daily budget")
+fresh(cfg_new({ MAX_POS = 10 }, { PAIR = "live" }))
+sigma_ready(4)                                   -- sigma 2 тика/sqrt(с)
+local per = 2.33 * 2 * math.sqrt(600) * 0.8
+check(SC.R.pos_cap(bm(), "real") == math.min(10, math.floor(0.5 * 2000 / per)), "q_VaR = floor(0.5 * 2000 / (2.33 sigma sqrt(600) tick_rub)) = " .. SC.R.pos_cap(bm(), "real"))
+SC.R.pnl.real = -1900                            -- бюджет почти израсходован
+check(SC.R.pos_cap(bm(), "real") == 0, "budget 100 RUB -> no new positions")
+local ok54, why54 = SC.R.fits(bm(), "real", { legs = { { side = "B", px = 7000, qty = 1 }, { side = "S", px = 7003, qty = 1 } } }, SIM.t)
+check(not ok54 and why54 == "var_cap", "entry refused: var_cap")
+
+print("TEST 55: volatility stop")
+fresh(cfg_new())
+check(SC.R.stop_ticks(bm()) == 6, "sigma unknown -> STOP_TICKS 6")
+sigma_ready(1)
+check(SC.R.stop_ticks(bm()) == math.ceil(4 * math.sqrt(60)), "S = ceil(4 * sigma * sqrt(60)) = " .. SC.R.stop_ticks(bm()))
+
+print("TEST 56: micro-price table learned from own data; saved and loaded")
+fresh(cfg_new({ MICRO_MIN_N = 20, MICRO_H_SEC = 1 }))
+for k = 0, 40 do                                  -- сильный перекос в биды -> через 1 с цена на тик выше
+  SIM.book("BMX6", { { 7000 + k, 100 } }, { { 7001 + k, 5 } })
+  SIM.run(1)
+end
+local g56, learned56 = SC.A.G(bm())
+check(learned56 and g56 > 0.6, "imbalance +0.9 -> learned shift " .. string.format("%.2f", g56) .. " tick up")
+SC.A.save()
+local f56 = io.open(OUT .. "/scalp_alpha.txt", "r")
+local txt56 = f56 and f56:read("*a") or ""
+if f56 then f56:close() end
+check(txt56:find("micro") ~= nil, "scalp_alpha.txt written")
+
+print("TEST 57: QUIK windows render all columns (stubbed table API)")
+do
+  local cells, errs = {}, 0
+  local nid = 0
+  AllocTable = function() nid = nid + 1; return nid end
+  AddColumn = function() return true end
+  CreateWindow = function() return true end
+  local nrow = {}
+  InsertRow = function(id) nrow[id] = (nrow[id] or 0) + 1; return nrow[id] end
+  SetCell = function(id, row, col, txt) cells[id .. ":" .. row .. ":" .. col] = txt; return true end
+  SetColor = function() return true end
+  SetWindowCaption = function() return true end
+  SetWindowPos = function() return true end
+  GetWindowRect = function() return 0, 0, 100, 100 end
+  DestroyTable = function() return true end
+  QTABLE_STRING_TYPE, QTABLE_DEFAULT_COLOR, QTABLE_NO_INDEX = 1, -1, -1
+  local cfg = cfg_new({ AS_PRIOR_TICKS = 0 }, { TIGHT = "live", MM = "paper" })
+  cfg.SHOW_TABLE = true
+  os.remove(OUT .. "/scalp_state.txt"); os.remove(OUT .. "/scalp_alpha.txt")
+  SC = { dir = DIR, out_dir = OUT, config_override = cfg, ui_test = true }
+  SC.clock = function() return SIM.t end
+  local echo = {}
+  SC.echo = function(l) if l:find("UI ") then echo[#echo + 1] = l end end
+  dofile(DIR .. "/tools/sim_quik.lua")
+  dofile(DIR .. "/scalp.lua")
+  SIM.add_sec("BMX6", 0.01, 2, 0.8, 20261102); SIM.add_sec("BRX6", 0.01, 2, 8.0, 20261030)
+  SIM.book("BMX6", { { 9999, 5 }, { 9998, 30 } }, { { 10002, 5 }, { 10003, 30 } })
+  SIM.book("BRX6", { { 7050, 50 } }, { { 7051, 50 } })
+  SC.init(); SIM.run(3)
+  SIM.trade("BMX6", -1, 10000, 1)
+  SIM.run(3)
+  check(#echo == 0, "no UI errors: " .. tostring(echo[1]))
+  local n = 0
+  for _ in pairs(cells) do n = n + 1 end
+  check(n > 300, "cells written: " .. n)
+  local found = false
+  for k, v in pairs(cells) do if tostring(v):find("VPIN") then found = true end end
+  check(found, "market regime column filled")
+  AllocTable, AddColumn, CreateWindow, InsertRow, SetCell, SetColor, SetWindowCaption, SetWindowPos, GetWindowRect, DestroyTable = nil
+end
+
+------------------------------------------------------------------
 print("TEST 13: random market 20 min (LIVE + virtual setups) - invariants")
 local function fuzz(mode, minutes, seed, hold)
   local cfg = base_cfg({ MODE = mode })
-  cfg.INSTRUMENTS[1].SETUPS = { PAIR = "live", TIGHT = "live", FADE = "live", WALL = "paper" }
+  -- полный новый набор: фильтр отбора, режим рынка, MM в бою, выход AS (hold = nil) или прежние режимы
+  cfg.INSTRUMENTS[1].SETUPS = { PAIR = "live", TIGHT = "live", FADE = "live", WALL = "paper", MM = "live", MOMO = "paper", SQZ = "paper" }
   cfg.DEFAULTS = { MAX_POS = 3, QUOTE_SIZE = 1, EXIT_HOLD_EOD = hold }
   fresh(cfg)
   math.randomseed(seed)
@@ -600,7 +887,7 @@ local function fuzz(mode, minutes, seed, hold)
   end
   return inv
 end
-local inv = fuzz("LIVE", 20, 42, false)
+local inv = fuzz("LIVE", 20, 42, nil)
 check(inv.taker == 0, "no taker fills")
 check(inv.maxpos <= 3, "position within MAX_POS, max " .. inv.maxpos)
 check((SIM.self_cross or 0) == 0, "no self-cross attempts: " .. tostring(SIM.self_cross))

@@ -1,4 +1,13 @@
--- risk.lua : окна торговли, лимиты, паузы, достоверность данных.
+-- risk.lua : окна торговли, лимиты, паузы, достоверность данных, КРИТИЧЕСКИЕ ПОРОГИ.
+--
+-- Формулы порогов (подробно - docs/model.md):
+--   издержки на сторону, тиков     c = (BROKER_FEE_RUB + EXCH_MAKER_FEE_RUB) / стоимость_тика
+--   минимальный захват круга       C_min = max(1, ceil(2c + CAPTURE_SAFETY_TICKS))
+--   лимит позиции по VaR           q_VaR = floor( VAR_BUDGET_FRAC * B / (VAR_Z * sigma * sqrt(VAR_H_SEC) * стоимость_тика) ),
+--                                  B = DAILY_LOSS_LIMIT_RUB + итог_дня + открытые (остаток дневного бюджета)
+--   стоп по волатильности          S = max(STOP_MIN_TICKS, ceil(VOL_STOP_K * sigma * sqrt(VOL_STOP_H_SEC)))
+--   просадка дня от пика           peak - (итог + открытые) >= DAY_DD_LIMIT_RUB -> только закрытие
+--   безубыточная доля прибыльных   p* = L / (W + L)  (W, L - средние выигрыш и проигрыш, в сводке)
 return function(SC)
   local R = {}
   SC.R = R
@@ -21,7 +30,9 @@ return function(SC)
       R.pnl = { real = 0, virtual = 0 }
       R.inst_pnl, R.streak, R.pause_until, R.last_loss = {}, {}, {}, {}
       R.day_stop = false
+      R.peak = 0
       if SC.O then SC.O.stats.err_tx = 0 end
+      if SC.G then SC.G.reset_day() end
     end
   end
 
@@ -132,6 +143,50 @@ return function(SC)
     return math.max(1, s.mid * pct / 100)
   end
 
+  ------------------------------------------------------------------
+  -- ИЗДЕРЖКИ И КРИТИЧЕСКИЕ ПОРОГИ
+  ------------------------------------------------------------------
+  -- издержки на одно исполнение (сторону), тиков
+  function R.cost_ticks(inst)
+    local P = inst.P
+    local fee = (P.BROKER_FEE_RUB or 0) + (P.EXCH_MAKER_FEE_RUB or 0)
+    local st = inst.step_price
+    if fee <= 0 or not st or st <= 0 then return 0 end
+    return fee / st
+  end
+
+  -- минимальный захват круга (покупка + продажа), тиков: покрыть две комиссии и запас
+  function R.min_capture(inst)
+    local P = inst.P
+    return math.max(1, math.ceil(2 * R.cost_ticks(inst) + (P.CAPTURE_SAFETY_TICKS or 0) - 1e-9))
+  end
+
+  -- лимит позиции: MAX_POS, HARD_MAX_POS и VaR открытой позиции против остатка дневного бюджета
+  function R.pos_cap(inst, backend)
+    local P = inst.P
+    local cap = math.min(P.MAX_POS, SC.cfg.HARD_MAX_POS)
+    if not P.VAR_CAP then return cap end
+    local sg = SC.A and SC.A.sigma(inst)
+    local st = inst.step_price
+    if not sg or not st or st <= 0 then return cap end
+    local budget = SC.cfg.DAILY_LOSS_LIMIT_RUB + (R.pnl[backend or "real"] or 0)
+    if (backend or "real") == "real" then budget = budget + math.min(0, R.unrealized or 0) end
+    local per_lot = P.VAR_Z * sg * math.sqrt(P.VAR_H_SEC) * st
+    if per_lot <= 0 then return cap end
+    local q = math.floor(P.VAR_BUDGET_FRAC * math.max(0, budget) / per_lot)
+    return math.min(cap, q)
+  end
+
+  -- порог стопа по цене, тиков: по волатильности (если включено и sigma известна), иначе STOP_TICKS
+  function R.stop_ticks(inst)
+    local P = inst.P
+    local sg = SC.A and SC.A.sigma(inst)
+    if (P.VOL_STOP_K or 0) > 0 and sg then
+      return math.max(P.STOP_MIN_TICKS, math.ceil(P.VOL_STOP_K * sg * math.sqrt(P.VOL_STOP_H_SEC) - 1e-9))
+    end
+    return P.STOP_TICKS
+  end
+
   function R.max_cycles(inst)
     local P = inst.P
     local n = P.MAX_REAL_CYCLES or 0
@@ -183,7 +238,16 @@ return function(SC)
       if c.pos ~= 0 and c.avg and s.valid then un = un + (s.mid - c.avg) * c.pos * (c.inst.step_price or 0) end
     end
     R.unrealized = un
-    if (R.pnl.real or 0) + un <= -SC.cfg.DAILY_LOSS_LIMIT_RUB then
+    local eq = (R.pnl.real or 0) + un
+    R.peak = math.max(R.peak or 0, eq)
+    local dd = SC.cfg.DAY_DD_LIMIT_RUB or 0
+    if dd > 0 and R.peak - eq >= dd then
+      R.day_stop = true
+      U.alert(string.format("DRAWDOWN FROM DAY PEAK %.0f RUB (peak %.0f, now %.0f) - closing passively, no new entries",
+        R.peak - eq, R.peak, eq))
+      return
+    end
+    if eq <= -SC.cfg.DAILY_LOSS_LIMIT_RUB then
       R.day_stop = true
       U.alert(string.format("DAILY LOSS LIMIT incl. open positions: %.0f RUB - closing passively, no new entries",
         (R.pnl.real or 0) + un))
@@ -199,7 +263,10 @@ return function(SC)
     for _, l in ipairs(spec.legs) do
       if l.side == "B" then nb = nb + l.qty else ns = ns + l.qty end
     end
-    local maxpos = math.min(P.MAX_POS, SC.cfg.HARD_MAX_POS)
+    local maxpos = R.pos_cap(inst, backend)
+    if maxpos < math.min(P.MAX_POS, SC.cfg.HARD_MAX_POS) and (pos + b + nb > maxpos or -(pos - s - ns) > maxpos) then
+      return false, "var_cap"
+    end
     if pos + b + nb > maxpos or -(pos - s - ns) > maxpos then return false, "max_pos" end
     if backend == "real" and not SC.O.can_send(t, #spec.legs) then return false, "tx_limit" end
     -- не встать против своей же заявки (кросс-сделка: биржа отклоняет и берёт сбор за ошибку)
@@ -239,6 +306,7 @@ return function(SC)
     if c.traded == 0 then return end
     local rub = R.cycle_rub(c)
     local key = c.inst.sec .. c.backend
+    if SC.G then SC.G.on_cycle_done(c, rub) end
     R.pnl[c.backend] = (R.pnl[c.backend] or 0) + rub
     R.inst_pnl[key] = (R.inst_pnl[key] or 0) + rub
     if c.realized < 0 then

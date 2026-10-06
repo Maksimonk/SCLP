@@ -10,6 +10,8 @@
      исполняться не той ногой: PAIR_MIN_SPREAD поднять или PAIR выключить.
   2. ЦИКЛЫ: по сетапам (реальные и виртуальные): доля прибыльных, тиков на лот, рубли, фазы выхода.
   3. МАРКАУТЫ входов (+ хорошо для нас) по сетапу и ширине спреда: где исполнение "отравлено".
+  Для каждого сетапа - безубыточная доля прибыльных p* = L / (W + L): если фактическая доля ниже, сетап убыточен
+  по конструкции (много мелких плюсов не покрывают редкие крупные минусы).
 """
 import csv
 import glob
@@ -101,8 +103,21 @@ def cycles(folder, days):
         for r in rs:
             ph[r["exit_phase"]] += 1
         phs = " ".join(f"{k}:{v}" for k, v in sorted(ph.items(), key=lambda x: -x[1]))
+        # безубыточная доля прибыльных p* = L / (W + L): сколько нужно выигрывать при таком соотношении плюсов и минусов
+        w = [p for p in pnl if p and p > 0]
+        l = [-p for p in pnl if p and p < 0]
+        be_txt = ""
+        if w and l:
+            W, L = st.mean(w), st.mean(l)
+            pstar = L / (W + L)
+            be_txt = (f"  средний +{W:.1f} / -{L:.1f} тиков, нужно выигрывать {pstar:.0%}"
+                      + ("  <-- УБЫТОЧНО ПО КОНСТРУКЦИИ" if wins / len(rs) < pstar else ""))
         print(f"{setup:5} {be:8} N {len(rs):4d}  win {wins / len(rs):4.0%}  тиков/лот {f(mean(pnl))}  "
-              f"руб {rub:+.0f}  удержание {med([num(r['hold_sec']) for r in rs]) or 0:.1f} с  фазы [{phs}]")
+              f"руб {rub:+.0f}  удержание {med([num(r['hold_sec']) for r in rs]) or 0:.1f} с  фазы [{phs}]{be_txt}")
+        # издержки: брокерская комиссия съедает захват 1 тик?
+        loss_rub = [num(r["pnl_rub"]) for r in rs if (num(r["pnl_ticks"]) or 0) == 0 and (num(r["pnl_rub"]) or 0) < 0]
+        if loss_rub:
+            print(f"      {len(loss_rub)} циклов в 0 тиков дали минус в рублях (комиссия): {sum(loss_rub):+.0f} руб")
 
 
 def fills(folder, days):

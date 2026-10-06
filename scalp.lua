@@ -22,9 +22,11 @@ local function load_mod(name) return dofile(SC.dir .. "/sc_lib/" .. name .. ".lu
 
 local U = load_mod("util")
 SC.cfg = {}   -- до загрузки настроек
+load_mod("alpha"); load_mod("guard"); load_mod("mm"); load_mod("breakout")
 load_mod("book"); load_mod("oms"); load_mod("paper"); load_mod("cycle")
 load_mod("setups"); load_mod("risk"); load_mod("stats"); load_mod("ui")
 local O, V, C, S, R, K, ST, W = SC.O, SC.V, SC.C, SC.S, SC.R, SC.K, SC.ST, SC.W
+local A, G, BO = SC.A, SC.G, SC.BO
 
 ------------------------------------------------------------------
 -- НАСТРОЙКИ
@@ -55,6 +57,9 @@ local function build_P(user, entry)
   local P = U.merge(DEF.INSTRUMENT, user.DEFAULTS or {})
   P = U.merge(P, entry)
   P.SETUPS = U.merge(DEF.INSTRUMENT.SETUPS, U.merge((user.DEFAULTS or {}).SETUPS or {}, entry.SETUPS or {}))
+  -- совместимость: в настройках задан прежний EXIT_HOLD_EOD, а EXIT_MODE нет - прежнее поведение выхода
+  local function has(k) return (user.DEFAULTS or {})[k] ~= nil or entry[k] ~= nil end
+  if has("EXIT_HOLD_EOD") and not has("EXIT_MODE") then P.EXIT_MODE = P.EXIT_HOLD_EOD and "HOLD" or "PHASES" end
   return P
 end
 
@@ -118,6 +123,7 @@ local function setup_instruments(user)
         local inst, err = make_inst(class, sec, P)
         if not inst then U.alert(err) else
           inst.cfg_index = i
+          inst.lkey = entry.BASE or sec              -- обучение (alpha) переживает смену контракта
           K.new_market(inst)
           if entry.REF then
             local rc = entry.REF.CLASS or class
@@ -138,6 +144,17 @@ local function setup_instruments(user)
             (function() local r = {} for k, v in pairs(P.SETUPS) do r[#r + 1] = k .. "=" .. v end table.sort(r) return table.concat(r, " ") end)()))
         end
       end
+    end
+  end
+  -- издержки и минимальный захват: при ненулевой комиссии брокера захват 1 тик (TIGHT) убыточен
+  for _, inst in ipairs(SC.insts) do
+    local P = inst.P
+    U.log(string.format("COSTS %s: tick %s RUB, fee/side %.2f RUB = %.2f ticks -> min capture %d tick(s)%s",
+      inst.sec, tostring(inst.step_price), (P.BROKER_FEE_RUB or 0) + (P.EXCH_MAKER_FEE_RUB or 0),
+      R.cost_ticks(inst), R.min_capture(inst), R.min_capture(inst) > 1 and " - TIGHT (1 tick) disabled" or ""))
+    if (P.BROKER_FEE_RUB or 0) == 0 and SC.cfg.MODE == "LIVE" then
+      U.log("  WARNING " .. inst.sec .. ": BROKER_FEE_RUB = 0. Check your broker tariff: with a fee of even 0.3-1 RUB per " ..
+        "contract a 1-tick round trip is a loss, and the robot cannot see it")
     end
   end
   SC.by_sec = {}
@@ -181,7 +198,8 @@ local function save_state(t, force)
   local gaps = {}
   for _, inst in ipairs(SC.insts) do gaps[inst.sec] = { n = inst.gaps or {}, dur = inst.gap_dur or 0 } end
   L[#L + 1] = "}, stats = " .. U.serialize({ pnl = R.pnl, inst_pnl = R.inst_pnl, streak = R.streak,
-    day_stop = R.day_stop, agg = ST.agg, gaps = gaps, fills_log = SC.fills_log or {}, fills_seq = SC.fills_seq or 0 }) .. " }"
+    day_stop = R.day_stop, agg = ST.agg, gaps = gaps, fills_log = SC.fills_log or {}, fills_seq = SC.fills_seq or 0,
+    demoted = G.demoted, ring = G.ring, peak = R.peak }) .. " }"
   U.write_file_atomic(state_path(), table.concat(L, "\n"))
 end
 function SC.mark_state() state_dirty = true end
@@ -213,6 +231,9 @@ local function restore_state(t)
     for k, v in pairs(x.inst_pnl or {}) do R.inst_pnl[k] = v end
     for k, v in pairs(x.streak or {}) do R.streak[k] = v end
     if x.day_stop then R.day_stop = true end
+    for k, v in pairs(x.demoted or {}) do G.demoted[k] = v end
+    for k, v in pairs(x.ring or {}) do G.ring[k] = v end
+    R.peak = x.peak or R.peak
     for k, a in pairs(x.agg or {}) do ST.agg[k] = a end
     for sec, g in pairs(x.gaps or {}) do
       local inst = SC.by_sec[sec]
@@ -377,7 +398,7 @@ local function process_events(t)
       local inst = SC.by_sec[e.sec]
       if inst then
         local tr = K.on_tape(inst, e, t)
-        if tr then V.on_tape(inst, tr, t) end
+        if tr then A.on_trade(inst, tr, t); V.on_tape(inst, tr, t) end
       end
     elseif e.k == "reply" then O.on_reply(e, t); SC.mark_state()
     elseif e.k == "order" then O.on_order(e, t); SC.mark_state()
@@ -443,6 +464,7 @@ function SC.init()
   R.check_day(t)
   U.log(string.format("=== " .. SC.name .. " start (TRANS_ID copy %d): MODE %s, account %s, passive-only via universal format (%s = %s) ===",
     O.instance(), SC.cfg.MODE, SC.cfg.ACCOUNT, SC.cfg.TX.COND, SC.cfg.TX.COND_PASSIVE))
+  A.load()
   setup_instruments(user)
   if #SC.insts == 0 then U.alert("no instruments") end
   restore_state(t)
@@ -451,7 +473,7 @@ function SC.init()
   W.open()
 end
 
-local t_cfg, t_foreign, t_sync = 0, 0, 0
+local t_cfg, t_foreign, t_sync, t_alpha = 0, 0, 0, 0
 local function reload_config(t)
   local user = read_user_config()
   if not user then U.log_every("cfgerr", 60, "scalp_config.lua: read error, keeping old settings"); return end
@@ -469,6 +491,7 @@ function SC.step(t)
     if dirty[inst.sec] or not inst.t_book_read or t - inst.t_book_read >= 0.5 then
       dirty[inst.sec] = nil
       K.read_book(inst, t)
+      A.on_book(inst, t)
       V.on_book(inst, t)
     end
     if inst.ref and (dirty["ref:" .. inst.ref.sec] or not inst.ref.t_read or t - inst.ref.t_read >= 0.25) then
@@ -478,7 +501,9 @@ function SC.step(t)
   for _, inst in ipairs(SC.insts) do
     if inst.ref then dirty["ref:" .. inst.ref.sec] = nil end
   end
+  for _, inst in ipairs(SC.insts) do A.tick(inst, t); BO.tick(inst, t) end
   V.tick(t)
+  G.tick(t)
   C.tick_all(t)
   if O.halt and not SC.halt_done then
     SC.halt_done = true
@@ -495,6 +520,7 @@ function SC.step(t)
   if t - t_foreign >= 5 then t_foreign = t; scan_foreign(t) end
   if t - t_sync >= 1 then t_sync = t; sync_broker(t); R.check_open_loss(t); read_commands(t) end
   if t - t_cfg >= 5 then t_cfg = t; reload_config(t) end
+  if t - t_alpha >= 60 then t_alpha = t; A.save() end
   save_state(t)
 end
 
@@ -516,6 +542,7 @@ function SC.shutdown()
     if q ~= 0 then U.alert(inst.sec .. ": stopped WITH POSITION " .. q .. " (saved to scalp_state.txt, next start closes it)") end
   end
   save_state(U.now(), true)
+  pcall(A.save)
   ST.final(U.now())
   W.close()
   U.log("=== SCALP stop ===")
