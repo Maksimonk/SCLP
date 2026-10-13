@@ -51,6 +51,11 @@ return {
   },
   ORDER_TAG = "SCLP",          -- COMMENT of fixed-format orders (orders.brokerref): finds SCLP orders after a restart
 
+  -- CLOSING-ORDER REQUOTE (R toggles): only orders that reduce the position (arrow key or F) follow the market,
+  -- never below break-even. Cancel -> confirmed -> new, so there are never two orders at once.
+  REQUOTE = true,
+  REQUOTE_MIN_LIFE_MS = 300,   -- do not touch an order younger than N ms (queue priority)
+
   SKEW_TICKS_PER_LOT = 0.5,    -- quotes shift by -N * position ticks (long -> both quotes lower)
 
   ------------------------------------------------------------------

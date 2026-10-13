@@ -1,5 +1,7 @@
 -- trader.lua : what the keys do. Passive pricing, take-profit, passive flatten, PANIC.
--- Orders are NEVER moved by the script: an order stays at the price where you placed it until you cancel it.
+-- Orders are not moved by the script, with ONE exception (R toggles it): an order that CLOSES the position follows the
+-- market by its offset rule, but never to a price where the close would lose money (break-even = FIFO entry price of
+-- the lots it closes + entry and exit fees). Opening orders and take-profits always stay where you put them.
 --
 -- OFFSET (ticks, signed) is applied to OUR OWN side of the book, measured on the book WITHOUT our orders:
 --   BUY  price = best bid + offset        SELL price = best ask - offset
@@ -117,6 +119,7 @@ return function(X)
     local n = 0
     for _, o in ipairs(X.O.working(inst)) do
       if not pred or pred(o) then
+        o.replace = nil
         if not o.want_kill then X.O.cancel(o, why, t); n = n + 1 end
       end
     end
@@ -192,10 +195,55 @@ return function(X)
     return n
   end
 
+  -- target of a closing order: offset rule (or the most aggressive passive price for F), floored at break-even
+  local function close_target(inst, o, q)
+    local side = o.side
+    local px = (o.src == "flat") and T.edge_price(inst, side) or T.price(inst, side, o.offset or 0)
+    if not px then return nil end
+    local be = X.M.breakeven(inst, side, q)
+    if not be then return nil end
+    if side == "S" then px = math.max(px, math.ceil(be - 1e-9)) else px = math.min(px, math.floor(be + 1e-9)) end
+    if not X.I.in_limits(inst, px) or not passive_ok(inst, side, px) then return nil end
+    return px
+  end
+
+  local function closing(inst, side)
+    local pos = X.M.get(inst).pos
+    return (side == "S" and pos > 0) or (side == "B" and pos < 0), abs(pos)
+  end
+
+  local function requote(inst, t)
+    local min_life = (X.cfg.REQUOTE_MIN_LIFE_MS or 300) / 1000
+    for _, o in ipairs(X.O.working(inst)) do
+      local is_close, pos = closing(inst, o.side)
+      if is_close and (o.src == "key" or o.src == "flat") and o.state == "ACTIVE" and not o.want_kill
+         and t - (o.t_active or o.t_send) >= min_life then
+        local target = close_target(inst, o, math.min(o.qty - o.filled, pos))
+        if target and target ~= o.px then
+          o.replace = true
+          X.O.cancel(o, "requote", t)
+        end
+      end
+    end
+  end
+
   function T.on_done(o, t)
     X.M.on_order_done(o)
     local p = X.panic
     if p and p.order == o then p.order = nil end
+    if not o.replace then return end
+    o.replace = nil
+    local inst = o.inst
+    local is_close, pos = closing(inst, o.side)
+    local rem = math.min(o.qty - o.filled, pos)
+    if not is_close or rem <= 0 or inst ~= X.inst or not X.st.requote then return end
+    if not X.R.can_reduce(inst, t) then return end
+    X.B.read(inst, t)
+    local px = close_target(inst, o, rem)
+    if not px then return end
+    local n = X.O.place(inst, o.side, px, rem, { src = o.src, offset = o.offset, px0 = o.px0 }, t)
+    if n then U.log(string.format("[%s] REQUOTE close %s %s -> %s (break-even %s)", inst.sec, o.side, inst:px_str(o.px),
+      inst:px_str(px), U.fmt(X.M.breakeven(inst, o.side, rem) * inst.tick, inst.scale + 2))) end
   end
 
   function T.on_reject(o, msg, cls)
@@ -219,7 +267,7 @@ return function(X)
         if reduce_src(w.src) and not w.want_kill then list[#list + 1] = w; total = total + (w.qty - w.filled) end
       end
       if not closing then
-        for _, w in ipairs(list) do X.O.cancel(w, "position closed", t) end
+        for _, w in ipairs(list) do w.replace = nil; X.O.cancel(w, "position closed", t) end
       else
         for i = #list, 1, -1 do                       -- newest first while closing orders exceed the position
           if total <= abs(pos) then break end
@@ -236,6 +284,7 @@ return function(X)
     if not inst then return end
     if X.panic then T.panic_tick(t) end
     hygiene(inst, t)
+    if X.st.requote and inst.bk.valid and not (X.panic and X.panic.stage ~= "done") then requote(inst, t) end
   end
 
   ------------------------------------------------------------------
@@ -259,7 +308,7 @@ return function(X)
   local function panic_cancel(inst, t)
     local left = 0
     for _, o in ipairs(X.O.working(inst)) do
-      if o.mode ~= "taker" then X.O.cancel(o, "panic", t); left = left + 1 end
+      if o.mode ~= "taker" then o.replace = nil; X.O.cancel(o, "panic", t); left = left + 1 end
     end
     if (X.cfg.PANIC_KILL_SCOPE or "own") == "account" then
       for _, row in ipairs(X.O.active_rows(inst)) do X.O.kill_row(inst, row, t); left = left + 1 end

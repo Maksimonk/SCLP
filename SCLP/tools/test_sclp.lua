@@ -201,6 +201,33 @@ local kills2 = 0
 for _, tx in ipairs(SIM.sent) do if tx.ACTION == "KILL_ORDER" then kills2 = kills2 + 1 end end
 check(kills2 == kills + 1, "the only cancel is the user's C")
 
+T_("TEST 5b: a closing order follows the market but never below break-even")
+reset_book()
+SCLP.st.tp, SCLP.st.requote = 0, true
+key(UP); SIM.run(0.2)
+SIM.trade("BMX6", -1, 7000, 30); SIM.run(0.3)       -- long 1 @ 70.00
+check(mx().pos == 1, "long 1")
+key(DOWN); SIM.run(0.5)                              -- sell at best ask 70.03
+check(live("S")[1] and live("S")[1].px == 7003, "closing sell at 70.03")
+SIM.book("BMX6", { { 6997, 10 } }, { { 6999, 10 } })  -- market falls through our entry
+SIM.run(1.5)
+local cs = live("S")[1]
+-- break-even: 70.00 + (0.50 entry + 0.50 exit fee) / 0.80 RUB per tick = 70.0125 -> 70.02
+check(cs and cs.px == 7002, "sell pulled down only to break-even 70.02 (not 69.99), got " .. tostring(cs and cs.px))
+SIM.book("BMX6", { { 7003, 10 } }, { { 7005, 10 } })  -- market rises
+SIM.run(1.5)
+cs = live("S")[1]
+check(cs and cs.px == 7005, "sell follows the market up to 70.05")
+key(82)                                              -- R off
+SIM.book("BMX6", { { 7006, 10 } }, { { 7008, 10 } })
+SIM.run(1.5)
+check(live("S")[1] and live("S")[1].px == 7005, "R off: closing order stays")
+key(67); SIM.run(0.3)
+reset_book()
+key(DOWN); SIM.run(0.3)
+SIM.trade("BMX6", 1, 7003, 20); SIM.run(0.3)
+check(mx().pos == 0, "flat again")
+
 ------------------------------------------------------------------
 T_("TEST 6: BoC reject when the book moves before the order arrives - no automatic re-price")
 reset_book()

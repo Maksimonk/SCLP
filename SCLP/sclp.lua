@@ -39,7 +39,7 @@ local I, B, O, M, R, T, S, W = X.I, X.B, X.O, X.M, X.R, X.T, X.S, X.W
 -- window settings (saved in sclp_settings_<ACCOUNT>.lua)
 X.st = {
   inst_text = X.cfg.DEFAULT_INSTRUMENT, offset = math.max(0, X.cfg.OFFSET_TICKS or 0), qty = X.cfg.QTY, tp = X.cfg.TP_TICKS,
-  tp_last = X.cfg.TP_TICKS_DEFAULT, skew = X.cfg.SKEW, max_pos = X.cfg.MAX_POS,
+  tp_last = X.cfg.TP_TICKS_DEFAULT, requote = X.cfg.REQUOTE, skew = X.cfg.SKEW, max_pos = X.cfg.MAX_POS,
   max_loss = X.cfg.MAX_DAY_LOSS_RUB, open_insts = {},
 }
 
