@@ -119,6 +119,10 @@ check(#live("B") == 1, "key auto-repeat within 250 ms ignored")
 SIM.run(0.3)
 key(LEFT); key(RIGHT); key(RIGHT)                 -- offset 0 -> -1 -> 0 -> +1
 check(SCLP.st.offset == 1, "offset +1 via arrows")
+key(187); key(187); key(189)                      -- "=/+" twice, "-" once
+check(SCLP.st.qty == 2, "volume via +/- keys (no PgUp/PgDn needed)")
+key(109)                                          -- numpad minus
+check(SCLP.st.qty == 1, "numpad minus")
 key(UP); SIM.run(0.2)
 local b = live("B")
 check(#b == 2 and b[2].px == 7001, "second buy improves to 70.01 (bid + 1)")

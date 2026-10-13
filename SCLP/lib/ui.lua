@@ -14,7 +14,7 @@ return function(X)
   local U = X.U
   local floor, abs = math.floor, math.abs
 
-  local VK = { BACK = 8, ENTER = 13, ESC = 27, SPACE = 32, PGUP = 33, PGDN = 34, LEFT = 37, UP = 38, RIGHT = 39,
+  local VK = { BACK = 8, ENTER = 13, ESC = 27, SPACE = 32, LEFT = 37, UP = 38, RIGHT = 39,
                DOWN = 40, DEL = 46, F2 = 113, NUM_PLUS = 107, NUM_MINUS = 109, NUM_DOT = 110, PLUS = 187,
                MINUS = 189, DOT = 190 }
 
@@ -28,7 +28,7 @@ return function(X)
   local LEFT = {
     { id = "inst", label = "Инструмент [2xклик]", edit = "text" },
     { id = "offset", label = "Отступ, тиков [Влево/Вправо]", edit = "int" },
-    { id = "qty", label = "Объём, лотов [PgUp/PgDn]", edit = "int" },
+    { id = "qty", label = "Объём, лотов [+/-]", edit = "int" },
     { id = "tp", label = "Тейк-профит, тиков [T]", edit = "int" },
     { id = "requote", label = "Авто-перестановка [R]" },
     { id = "skew", label = "Перекос от позиции [K]" },
@@ -279,8 +279,9 @@ return function(X)
     elseif vk == VK.DOWN then T_.key_order("S", e.t, t)
     elseif vk == VK.LEFT then bump("offset", -1)
     elseif vk == VK.RIGHT then bump("offset", 1)
-    elseif vk == VK.PGUP or vk == VK.PLUS or vk == VK.NUM_PLUS then bump("qty", 1)
-    elseif vk == VK.PGDN or vk == VK.MINUS or vk == VK.NUM_MINUS then bump("qty", -1)
+    -- volume: the "=/+" and "-" keys of the main row (no Shift needed) or numpad + / -
+    elseif vk == VK.PLUS or vk == VK.NUM_PLUS then bump("qty", 1)
+    elseif vk == VK.MINUS or vk == VK.NUM_MINUS then bump("qty", -1)
     elseif vk == 66 then T_.cancel_side("B", t)                    -- B
     elseif vk == 83 then T_.cancel_side("S", t)                    -- S
     elseif vk == 67 or vk == VK.ESC then T_.cancel_all(t)          -- C / Esc
@@ -391,7 +392,7 @@ return function(X)
     vals.state = stt
     vals.panic = "PANIC: снять заявки и закрыть позицию (единственная тейкерская операция)"
     vals.msg = X.last_msg or ""
-    vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, PgUp/PgDn или +/- - объём"
+    vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, + / - - объём"
     vals.keys2 = "B/S - снять покупки/продажи, C или Esc - снять все, F - закрыть пассивно, H - пауза"
     vals.keys3 = "R - перестановка, T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
     local R = {}
