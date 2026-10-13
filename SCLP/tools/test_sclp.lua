@@ -38,7 +38,7 @@ local function cp(s) return SCLP.U.to_cp1251(s) end
 
 local function fresh_exchange()
   SC = { U = nil, cfg = { ACCOUNT = "TEST01" }, step = function(t) if SCLP and SCLP.step then SCLP.step(t) end end }
-  dofile(ROOT .. "/tools/sim_quik.lua")
+  dofile(ROOT .. "/SCLP/tools/sim_quik.lua")
   SIM.add_sec("BMX6", 0.01, 2, 0.8, 20261102)
   SIM.add_sec("BMV6", 0.01, 2, 0.8, 20261001)       -- expired: must not be chosen
   -- spread 3 ticks: 70.00 / 70.03

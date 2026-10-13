@@ -292,7 +292,7 @@ return function(X)
     U.log(string.format("[%s] orders.passive_only_order = %s", o.inst.sec, tostring(v)))
     if not on then
       O.halt = "у принятой заявки НЕ установлен признак «Только пассивная» (passive_only_order = " .. tostring(v) ..
-               "). Поля TX не подходят вашему QUIK - tools/probe_passive.lua"
+               "). Поля TX не подходят вашему QUIK - SCLP/tools/probe_passive.lua"
       U.alert(O.halt, 3)
       O.cancel_where(o.inst, nil, "halt")
     end

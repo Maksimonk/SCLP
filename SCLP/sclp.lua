@@ -32,11 +32,6 @@ do
     if not ok then X.cfg_error = tostring(cfg) end
   end
   X.cfg = U.merge(DEF, user)
-  -- FORTS account: shared with the scalper config when not set here
-  if (X.cfg.ACCOUNT or "") == "" then
-    local ok, sc = pcall(dofile, X.dir .. "/../scalp_config.lua")
-    if ok and type(sc) == "table" and (sc.ACCOUNT or "") ~= "" then X.cfg.ACCOUNT = sc.ACCOUNT end
-  end
 end
 for _, m in ipairs({ "inst", "book", "oms", "metrics", "risk", "trader", "state", "ui" }) do load_mod(m) end
 local I, B, O, M, R, T, S, W = X.I, X.B, X.O, X.M, X.R, X.T, X.S, X.W
