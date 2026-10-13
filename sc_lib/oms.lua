@@ -253,7 +253,17 @@ return function(SC)
     local o = O.by_tid[tid]
     if o then
       if status == 0 or status == 1 then return end            -- промежуточные
-      if status == 3 then
+      -- 2 - нет связи со шлюзом, 12 - таймаут: заявка МОЖЕТ стоять на бирже. Не считаем отказом (иначе она
+      -- осталась бы без присмотра): ждём строку в таблице заявок, O.tick ищет её через PENDING_LOST_SEC
+      if status == 2 or status == 12 then
+        if not o.uncertain then
+          o.uncertain = true
+          U.log(string.format("[%s] tid=%d: reply status %d (%s) - order state unknown, waiting for the orders table",
+            o.inst.sec, tid, status, msg))
+        end
+        return
+      end
+      if status == 3 or status == 15 then                       -- 15 - принята после проверки доп. ограничений
         if r.order_num and tonumber(r.order_num) and tonumber(r.order_num) > 0 then
           o.num = r.order_num
           o.key = U.key_from_num(r.order_num) or U.key_from_text(msg, r.order_num)
@@ -295,7 +305,7 @@ return function(SC)
     if ko then
       if status == 0 or status == 1 then return end
       O.kill_tid[tid] = nil
-      if status == 3 then
+      if status == 3 or status == 15 then
         ko.kill_ok_t = t
       else
         -- снять не удалось: чаще всего заявка уже исполнена (ошибочная транзакция - за них сбор биржи)

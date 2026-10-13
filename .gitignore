@@ -14,3 +14,9 @@ __pycache__/
 .DS_Store
 scalp_ui.lua
 scalp_ui.lua.tmp
+# SCLP (ручной маркет-мейкинг): журналы, состояние, тесты
+SCLP/sclp_*.log
+SCLP/sclp_*.csv
+SCLP/sclp_state_*.lua*
+SCLP/sclp_settings_*.lua*
+SCLP/tools/test_out/
