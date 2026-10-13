@@ -137,11 +137,10 @@ check(#lat >= 3, "key -> send latency recorded")
 check(#SCLP.M.lat.send_reply >= 3, "send -> reply latency recorded")
 
 ------------------------------------------------------------------
-T_("TEST 3: limits and cap: max position, offset clamped to ask - 1")
+T_("TEST 3: no position limit, offset clamped to ask - 1")
 SIM.run(0.3)
-key(UP)
-check(#live("B") == 3, "4th buy refused by MAX_POS 3 (worst case)")
-check((SCLP.last_msg or ""):find("лимит позиции", 1, true) ~= nil, "message says position limit")
+key(UP); SIM.run(0.2)
+check(#live("B") == 4, "4th buy accepted: no position limit")
 key(67)                                           -- C: cancel all
 SIM.run(0.3)
 check(#live() == 0, "C cancels everything")
@@ -246,7 +245,6 @@ SIM.run(0.3)
 ------------------------------------------------------------------
 T_("TEST 7: PANIC (P,P): cancel + IOC flatten, the only taker order")
 reset_book()
-SCLP.st.max_pos = 5
 key(UP); SIM.run(0.3); key(UP); SIM.run(0.3)
 SIM.trade("BMX6", -1, 7000, 30)
 SIM.run(0.3)

@@ -32,7 +32,7 @@ return function(X)
     { id = "tp", label = "Тейк-профит, тиков [T]", edit = "int" },
     { id = "requote", label = "Перестановка закрытия [R]" },
     { id = "skew", label = "Перекос от позиции [K]" },
-    { id = "max_pos", label = "Макс. позиция, лотов", edit = "int" },
+    { id = "max_pos", label = "Лимит позиции" },
     { id = "max_loss", label = "Лимит убытка дня, руб", edit = "num" },
     { id = "mode", label = "Исполнение" },
     { id = "state", label = "Состояние" },
@@ -224,9 +224,6 @@ return function(X)
       if v < 0 or v > 1000 then X.say("Тейк 0..1000 тиков (0 - выкл.)", "err"); return end
       st.tp = v
       if v > 0 then st.tp_last = v end
-    elseif e.id == "max_pos" then
-      if v < 1 or v > (cfg.HARD_MAX_POS or 1000) then X.say("Позиция 1.." .. (cfg.HARD_MAX_POS or 1000), "err"); return end
-      st.max_pos = v
     elseif e.id == "max_loss" then
       if v <= 0 then X.say("Лимит убытка должен быть > 0", "err"); return end
       st.max_loss = v
@@ -385,7 +382,7 @@ return function(X)
     vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрывающие, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
-    vals.max_pos = vals.max_pos or tostring(st.max_pos)
+    vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"
     vals.max_loss = vals.max_loss or tostring(st.max_loss)
     local stt, stc = state_text(t)
     vals.state = stt

@@ -8,7 +8,6 @@ return {
   DEFAULT_INSTRUMENT = "SPBFUT BR",   -- first start only
   OFFSET_TICKS = 0,
   QTY = 1,
-  MAX_POS = 5,
   MAX_DAY_LOSS_RUB = 3000,
 
   -- Broker fee per contract (one side): 0 at the current tariff.

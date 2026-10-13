@@ -15,13 +15,11 @@ return {
   TP_TICKS = 0,                -- take-profit distance (0 = off); T toggles between 0 and the last value
   TP_TICKS_DEFAULT = 2,
   SKEW = false,                -- inventory skew (K toggles)
-  MAX_POS = 5,                 -- position limit, lots (worst case: all working orders fill)
   MAX_DAY_LOSS_RUB = 3000,     -- session equity (realized + open, net of fees) <= -N -> stop (+ PANIC)
 
   ------------------------------------------------------------------
   -- Hard limits (fat-finger protection)
   ------------------------------------------------------------------
-  HARD_MAX_POS = 50,
   MAX_ORDER_QTY = 20,
   OFFSET_MAX = 50,
   MAX_ORDERS_PER_MIN = 60,     -- new orders in a rolling minute (take-profits included)

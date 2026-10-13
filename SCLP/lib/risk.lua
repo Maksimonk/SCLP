@@ -76,17 +76,7 @@ return function(X)
     if mb then return false, mb end
     local per_min = X.O.orders_last_min(t)
     if per_min >= (X.cfg.MAX_ORDERS_PER_MIN or 60) then return false, "лимит заявок в минуту (" .. per_min .. ")" end
-    -- worst case: every working order fills
-    local pos = X.M.get(inst).pos
-    local wb, ws = X.O.working_qty(inst, "B"), X.O.working_qty(inst, "S")
-    local long = pos + wb + (side == "B" and qty or 0)
-    local short = pos - ws - (side == "S" and qty or 0)
-    local lim = math.min(X.st.max_pos, X.cfg.HARD_MAX_POS or 1000)
-    -- an order that only reduces the current position is fine even at the limit
-    local reduces = (side == "S" and pos - ws >= qty) or (side == "B" and -(pos + wb) >= qty)
-    if not reduces and (long > lim or -short > lim) then
-      return false, string.format("лимит позиции %d (позиция %+d, в заявках +%d/-%d)", lim, pos, wb, ws)
-    end
+    -- no position limit: the trader controls the position (the daily loss limit and PANIC remain)
     return true
   end
 
