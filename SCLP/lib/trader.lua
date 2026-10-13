@@ -2,7 +2,7 @@
 --
 -- OFFSET (ticks, signed) is applied to OUR OWN side of the book, measured on the book WITHOUT our orders:
 --   BUY  price = best bid + offset        SELL price = best ask - offset
---   offset > 0 improves inside the spread, 0 joins the best level, < 0 stands behind it.
+--   offset >= 0 only: 0 joins the best level, > 0 improves inside the spread.
 -- Then the price is capped so the order can never take liquidity:
 --   BUY  <= best ask - 1  and  < our lowest sell        SELL >= best bid + 1  and  > our highest buy
 -- (the second half prevents a cross-trade with ourselves, which MOEX rejects and counts as an erroneous transaction).
@@ -31,6 +31,7 @@ return function(X)
   function T.price(inst, side, offset)
     local bk = inst.bk
     if not bk.valid then return nil, "нет стакана" end
+    offset = math.max(0, offset or 0)                          -- never behind the best price
     local px = (side == "B") and (bk.bb + offset) or (bk.ba - offset)
     px = px - T.skew(inst)
     local cap = X.B.passive_cap(inst, side)

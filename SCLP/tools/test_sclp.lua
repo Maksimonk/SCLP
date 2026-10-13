@@ -117,7 +117,9 @@ check(#live("B") == 1, "buy is resting")
 key(UP)
 check(#live("B") == 1, "key auto-repeat within 250 ms ignored")
 SIM.run(0.3)
-key(LEFT); key(RIGHT); key(RIGHT)                 -- offset 0 -> -1 -> 0 -> +1
+key(LEFT)
+check(SCLP.st.offset == 0, "offset cannot go below 0")
+key(RIGHT)
 check(SCLP.st.offset == 1, "offset +1 via arrows")
 key(187); key(187); key(189)                      -- "=/+" twice, "-" once
 check(SCLP.st.qty == 2, "volume via +/- keys (no PgUp/PgDn needed)")
@@ -280,6 +282,8 @@ dbl(3); key(48); key(ENTER)                       -- 0 -> invalid
 check(SCLP.st.qty == 2, "volume 0 rejected")
 dbl(2); key(189); key(51); key(27)                -- "-3" then Esc
 check(SCLP.st.offset == 0 and SCLP.edit == nil, "Esc cancels the edit")
+dbl(2); key(189); key(51); key(ENTER)
+check(SCLP.st.offset == 0, "typed offset -3 rejected")
 dbl(8); for _, d in ipairs({ 53, 48, 48 }) do key(d) end; key(ENTER)
 check(SCLP.st.max_loss == 500, "loss limit 500")
 SCLP.st.qty = 1

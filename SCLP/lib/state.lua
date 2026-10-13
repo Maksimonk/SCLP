@@ -122,6 +122,7 @@ return function(X)
     for _, k in ipairs({ "inst_text", "inst_key", "offset", "qty", "tp", "tp_last", "requote", "skew", "max_pos", "max_loss" }) do
       if sv[k] ~= nil then X.st[k] = sv[k] end
     end
+    X.st.offset = math.max(0, tonumber(X.st.offset) or 0)          -- negative offsets are not allowed any more
     X.st.open_insts = type(sv.open_insts) == "table" and sv.open_insts or {}
     if today then
       for k, v in pairs(sv.counters or {}) do if X.O.st[k] ~= nil and type(v) == "number" then X.O.st[k] = v end end

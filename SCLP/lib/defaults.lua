@@ -10,7 +10,7 @@ return {
   -- Settings window start values (then the window values are saved and restored)
   ------------------------------------------------------------------
   DEFAULT_INSTRUMENT = "SPBFUT BR",   -- "CLASS CODE", "CODE", or a FORTS base ("BR" = nearest contract)
-  OFFSET_TICKS = 0,            -- 0 = join the best price, +1 = improve by a tick, -1 = one tick behind
+  OFFSET_TICKS = 0,            -- 0 = join the best price, +1 = improve by a tick inside the spread (never < 0)
   QTY = 1,
   TP_TICKS = 0,                -- take-profit distance (0 = off); T toggles between 0 and the last value
   TP_TICKS_DEFAULT = 2,

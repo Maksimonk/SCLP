@@ -215,7 +215,7 @@ return function(X)
     if not v or (e.kind == "int" and v ~= floor(v)) then X.say("Нужно " .. (e.kind == "int" and "целое " or "") .. "число: " .. s, "err"); return end
     local cfg = X.cfg
     if e.id == "offset" then
-      if abs(v) > (cfg.OFFSET_MAX or 50) then X.say("Отступ должен быть в пределах +-" .. (cfg.OFFSET_MAX or 50), "err"); return end
+      if v < 0 or v > (cfg.OFFSET_MAX or 50) then X.say("Отступ: 0.." .. (cfg.OFFSET_MAX or 50) .. " (0 - лучшая цена, больше - внутрь спреда)", "err"); return end
       st.offset = v
     elseif e.id == "qty" then
       if v < 1 or v > (cfg.MAX_ORDER_QTY or 100) then X.say("Объём 1.." .. (cfg.MAX_ORDER_QTY or 100), "err"); return end
@@ -250,10 +250,10 @@ return function(X)
 
   local function bump(field, d)
     local st, cfg = X.st, X.cfg
-    if field == "offset" then st.offset = U.clamp((st.offset or 0) + d, -(cfg.OFFSET_MAX or 50), cfg.OFFSET_MAX or 50)
+    if field == "offset" then st.offset = U.clamp((st.offset or 0) + d, 0, cfg.OFFSET_MAX or 50)
     else st.qty = U.clamp((st.qty or 1) + d, 1, cfg.MAX_ORDER_QTY or 100) end
     X.S.mark_settings()
-    X.say(field == "offset" and ("Отступ " .. string.format("%+d", st.offset)) or ("Объём " .. st.qty))
+    X.say(field == "offset" and ("Отступ " .. st.offset) or ("Объём " .. st.qty))
   end
 
   local function toggle(id)
@@ -380,7 +380,7 @@ return function(X)
       vals[X.edit.id] = "> " .. X.edit.buf .. "_"
     end
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
-    vals.offset = vals.offset or string.format("%+d  (покупка = бид%+d, продажа = аск%+d)", st.offset, st.offset, -st.offset)
+    vals.offset = vals.offset or string.format("%d  (покупка = бид+%d, продажа = аск-%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
     vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
     vals.requote = st.requote and string.format("ВКЛ (вперёд %d / назад %d тик., не дальше %d)", X.cfg.REQUOTE_AGGR_TICKS or 1,
