@@ -119,7 +119,7 @@ return function(X)
     local sv = S.read(S.settings_path())
     if not sv then return nil end
     local today = sv.day == U.date("%Y%m%d", t)
-    for _, k in ipairs({ "inst_text", "inst_key", "offset", "qty", "tp", "tp_last", "requote", "skew", "max_pos", "max_loss" }) do
+    for _, k in ipairs({ "inst_text", "inst_key", "offset", "qty", "tp", "tp_last", "skew", "max_pos", "max_loss" }) do
       if sv[k] ~= nil then X.st[k] = sv[k] end
     end
     X.st.offset = math.max(0, tonumber(X.st.offset) or 0)          -- negative offsets are not allowed any more

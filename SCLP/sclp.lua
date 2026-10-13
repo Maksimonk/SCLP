@@ -10,7 +10,7 @@
 --   lib/util.lua     time, CP1251, log, CSV        lib/inst.lua    instrument lookup/validation, parameter cache
 --   lib/book.lua     Level II without own orders    lib/oms.lua     transactions, order state machine by TRANS_ID
 --   lib/metrics.lua  FIFO lots, P&L, stats          lib/risk.lua    pre-trade checks, pauses, daily loss stop
---   lib/trader.lua   offset pricing, TP, requote,   lib/state.lua   persistence + recovery after restart
+--   lib/trader.lua   offset pricing, TP, flatten,   lib/state.lua   persistence + recovery after restart
 --                    passive flatten, PANIC         lib/ui.lua      window, hotkeys, settings editor
 SCLP = SCLP or {}
 local X = SCLP
@@ -39,7 +39,7 @@ local I, B, O, M, R, T, S, W = X.I, X.B, X.O, X.M, X.R, X.T, X.S, X.W
 -- window settings (saved in sclp_settings_<ACCOUNT>.lua)
 X.st = {
   inst_text = X.cfg.DEFAULT_INSTRUMENT, offset = math.max(0, X.cfg.OFFSET_TICKS or 0), qty = X.cfg.QTY, tp = X.cfg.TP_TICKS,
-  tp_last = X.cfg.TP_TICKS_DEFAULT, requote = X.cfg.REQUOTE, skew = X.cfg.SKEW, max_pos = X.cfg.MAX_POS,
+  tp_last = X.cfg.TP_TICKS_DEFAULT, skew = X.cfg.SKEW, max_pos = X.cfg.MAX_POS,
   max_loss = X.cfg.MAX_DAY_LOSS_RUB, open_insts = {},
 }
 

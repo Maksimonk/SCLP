@@ -183,37 +183,35 @@ check(SCLP.O.st.taker_suspect == 0, "no taker fills")
 SCLP.st.tp = 0
 
 ------------------------------------------------------------------
-T_("TEST 5: auto-requote follows the market, protects when support leaves, stops chasing")
+T_("TEST 5: orders are never moved by the script")
 reset_book()
-SCLP.st.requote = true
-key(UP); SIM.run(0.5)                             -- buy 70.00 (bid 70.00 x 10 market)
-SIM.set("BMX6", "B", 7001, 5)                     -- market bid 70.01: we are behind
-SIM.run(0.6)
+key(UP); SIM.run(0.5)                             -- buy 70.00
+SIM.set("BMX6", "B", 7001, 5)                     -- market bid moves up: we are behind
+SIM.run(1)
 b = live("B")
-check(#b == 1 and b[1].px == 7001, "requoted up to the new best bid 70.01")
-SIM.set("BMX6", "B", 7001, 0)                     -- support at 70.01 leaves: we are alone on top
-SIM.run(0.6)
+check(#b == 1 and b[1].px == 7000, "not chased: still 70.00")
+SIM.set("BMX6", "B", 7001, 0); SIM.set("BMX6", "B", 7000, 0)   -- support under us leaves
+SIM.run(1)
 b = live("B")
-check(#b == 1 and b[1].px == 7000, "requoted down to 70.00 when the level under us vanished")
-for px = 7001, 7008 do SIM.book("BMX6", { { px, 5 }, { px - 1, 10 } }, { { px + 3, 10 } }); SIM.run(0.5) end
-check(#live("B") == 0, "chase limit 5 ticks: order cancelled instead of chasing a trend")
-SCLP.st.requote = false
-SIM.book("BMX6", { { 7000, 10 }, { 6999, 12 }, { 6998, 15 } }, { { 7003, 10 }, { 7004, 12 }, { 7005, 15 } })
-SIM.run(0.5)
+check(#b == 1 and b[1].px == 7000, "not pulled back: still 70.00")
+local kills = 0
+for _, tx in ipairs(SIM.sent) do if tx.ACTION == "KILL_ORDER" then kills = kills + 1 end end
+key(67); SIM.run(0.3)
+local kills2 = 0
+for _, tx in ipairs(SIM.sent) do if tx.ACTION == "KILL_ORDER" then kills2 = kills2 + 1 end end
+check(kills2 == kills + 1, "the only cancel is the user's C")
 
 ------------------------------------------------------------------
-T_("TEST 6: BoC reject when the book moves before the order arrives -> one passive re-price")
+T_("TEST 6: BoC reject when the book moves before the order arrives - no automatic re-price")
 reset_book()
 key(RIGHT); key(RIGHT)                            -- offset +2 -> buy 70.02
 key(UP)
 SIM.set("BMX6", "S", 7002, 3)                     -- ask drops to 70.02 within the 100 ms latency
 SIM.run(0.3)
 check(SCLP.O.st.rej_boc == 1, "exchange rejected the would-be taker (BoC)")
-check(mx().pos == 0, "no taker fill")
-b = live("B")
-check(#b == 1 and b[1].px == 7001, "re-priced once on the new book: buy 70.01 = ask - 1, still Book-or-Cancel")
-check(last_sent()[cp("Условие исполнения")] == cp("Только пассивная"), "retry is BoC too")
-key(67); SIM.run(0.3)
+check(mx().pos == 0, "no fill")
+check(#live("B") == 0, "nothing re-sent automatically")
+check((SCLP.last_msg or ""):find("тейкер", 1, true) ~= nil, "user notified")
 SIM.set("BMX6", "S", 7002, 0)
 key(LEFT); key(LEFT)
 SIM.run(0.3)

@@ -30,7 +30,7 @@ return function(X)
     { id = "offset", label = "Отступ, тиков [Влево/Вправо]", edit = "int" },
     { id = "qty", label = "Объём, лотов [+/-]", edit = "int" },
     { id = "tp", label = "Тейк-профит, тиков [T]", edit = "int" },
-    { id = "requote", label = "Авто-перестановка [R]" },
+    { id = "requote", label = "Перестановка заявок" },
     { id = "skew", label = "Перекос от позиции [K]" },
     { id = "max_pos", label = "Макс. позиция, лотов", edit = "int" },
     { id = "max_loss", label = "Лимит убытка дня, руб", edit = "num" },
@@ -258,8 +258,7 @@ return function(X)
 
   local function toggle(id)
     local st = X.st
-    if id == "requote" then st.requote = not st.requote; X.say("Авто-перестановка " .. (st.requote and "ВКЛ" or "ВЫКЛ"))
-    elseif id == "skew" then st.skew = not st.skew; X.say("Перекос от позиции " .. (st.skew and "ВКЛ" or "ВЫКЛ"))
+    if id == "skew" then st.skew = not st.skew; X.say("Перекос от позиции " .. (st.skew and "ВКЛ" or "ВЫКЛ"))
     elseif id == "tp" then
       if (st.tp or 0) > 0 then st.tp_last = st.tp; st.tp = 0 else st.tp = st.tp_last or X.cfg.TP_TICKS_DEFAULT or 2 end
       X.say("Тейк-профит " .. ((st.tp > 0) and (st.tp .. " тиков") or "ВЫКЛ"))
@@ -287,7 +286,6 @@ return function(X)
     elseif vk == 67 or vk == VK.ESC then T_.cancel_all(t)          -- C / Esc
     elseif vk == 70 then T_.flatten_passive(t)                     -- F
     elseif vk == 80 then panic_key(t)                              -- P
-    elseif vk == 82 then toggle("requote")                         -- R
     elseif vk == 84 then toggle("tp")                              -- T
     elseif vk == 75 then toggle("skew")                            -- K
     elseif vk == 65 then                                           -- A: adopt exchange position after a mismatch
@@ -319,7 +317,7 @@ return function(X)
       local r = LEFT[e.p1 or 0]
       if not r or (e.p2 or 1) > 2 then return end
       if r.id == "panic" then X.T.panic("двойной клик PANIC", t, X.block and { position = "broker" } or nil)
-      elseif r.id == "requote" or r.id == "skew" then toggle(r.id)
+      elseif r.id == "skew" then toggle(r.id)
       elseif r.edit then start_edit(r.id) end
       return
     end
@@ -383,8 +381,7 @@ return function(X)
     vals.offset = vals.offset or string.format("%d  (покупка = бид+%d, продажа = аск-%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
     vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
-    vals.requote = st.requote and string.format("ВКЛ (вперёд %d / назад %d тик., не дальше %d)", X.cfg.REQUOTE_AGGR_TICKS or 1,
-      X.cfg.REQUOTE_CHASE_TICKS or 1, X.cfg.REQUOTE_MAX_CHASE_TICKS or 0) or "ВЫКЛ"
+    vals.requote = "нет: заявка стоит там, где вы её поставили"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = vals.max_pos or tostring(st.max_pos)
     vals.max_loss = vals.max_loss or tostring(st.max_loss)
@@ -394,7 +391,7 @@ return function(X)
     vals.msg = X.last_msg or ""
     vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, + / - - объём"
     vals.keys2 = "B/S - снять покупки/продажи, C или Esc - снять все, F - закрыть пассивно, H - пауза"
-    vals.keys3 = "R - перестановка, T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
+    vals.keys3 = "T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
     local R = {}
     if inst then
       local bk = inst.bk

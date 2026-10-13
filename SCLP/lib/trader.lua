@@ -1,4 +1,5 @@
--- trader.lua : what the keys do. Passive pricing, take-profit, auto-requote, passive flatten, PANIC.
+-- trader.lua : what the keys do. Passive pricing, take-profit, passive flatten, PANIC.
+-- Orders are NEVER moved by the script: an order stays at the price where you placed it until you cancel it.
 --
 -- OFFSET (ticks, signed) is applied to OUR OWN side of the book, measured on the book WITHOUT our orders:
 --   BUY  price = best bid + offset        SELL price = best ask - offset
@@ -87,7 +88,7 @@ return function(X)
       side == "B" and "бид" or "аск", side == "B" and offset or -offset, note and (", " .. note) or ""))
   end
 
-  -- passive flatten: one closing order at the most aggressive passive price, kept there by requote
+  -- passive flatten: one closing order at the most aggressive passive price (not moved afterwards)
   function T.flatten_passive(t)
     local inst = X.inst
     if not inst then return end
@@ -108,7 +109,7 @@ return function(X)
   end
 
   ------------------------------------------------------------------
-  -- CANCELS (a user cancel also stops any pending requote replacement)
+  -- CANCELS
   ------------------------------------------------------------------
   function T.cancel_where(pred, why, t)
     local inst = X.inst
@@ -116,7 +117,6 @@ return function(X)
     local n = 0
     for _, o in ipairs(X.O.working(inst)) do
       if not pred or pred(o) then
-        o.replace = nil
         if not o.want_kill then X.O.cancel(o, why, t); n = n + 1 end
       end
     end
@@ -143,7 +143,7 @@ return function(X)
     X.flash_fill(o.side)
     X.say(string.format("ИСПОЛНЕНО %s %d @ %s%s", o.side == "B" and "покупка" or "продажа", q, inst:px_str(px),
       net and string.format(", закрыто %+.2f руб", net) or ""))
-    if lot and (o.src == "key" or o.src == "requote") and (X.st.tp or 0) > 0 and inst == X.inst then
+    if lot and o.src == "key" and (X.st.tp or 0) > 0 and inst == X.inst then
       T.place_tp(inst, o.side, lot, t)
     end
   end
@@ -196,50 +196,10 @@ return function(X)
     X.M.on_order_done(o)
     local p = X.panic
     if p and p.order == o then p.order = nil end
-    local r = o.replace
-    if not r then return end
-    o.replace = nil
-    local inst = o.inst
-    local rem = o.qty - o.filled
-    if rem <= 0 or inst ~= X.inst or not X.st.requote then return end
-    X.B.read(inst, t)
-    local px
-    if r.src == "flat" then
-      local pos = X.M.get(inst).pos
-      if (o.side == "S" and pos <= 0) or (o.side == "B" and pos >= 0) then return end
-      rem = min(rem, abs(pos))
-      if not X.R.can_reduce(inst, t) then return end
-      px = T.edge_price(inst, o.side)
-    else
-      local ok, why = X.R.can_open(inst, o.side, rem, t)
-      if not ok then U.log("requote dropped: " .. why); return end
-      px = T.price(inst, o.side, r.offset)
-    end
-    if not px or not passive_ok(inst, o.side, px) then return end
-    local n = X.O.place(inst, o.side, px, rem, { src = r.src, offset = r.offset, px0 = r.px0 }, t)
-    if n then U.log(string.format("[%s] REQUOTE %s %s -> %s", inst.sec, o.side, inst:px_str(o.px), inst:px_str(px))) end
   end
 
   function T.on_reject(o, msg, cls)
     if o.src == "panic" then X.say("PANIC: отказ - " .. msg, "err"); return end
-    -- BoC reject of a fresh key order: the book moved between the key press and the exchange. Re-price once on the
-    -- current book with the same offset - the new order is again Book-or-Cancel, so it can never take liquidity.
-    local retry_ms = X.cfg.BOC_RETRY_MS or 0
-    if cls == "boc" and o.src == "key" and not o.retry_of and retry_ms > 0 and o.t_key
-       and U.now() - o.t_key <= retry_ms / 1000 and o.inst == X.inst then
-      local inst, t = o.inst, U.now()
-      X.B.read(inst, t)
-      local ok = X.R.can_open(inst, o.side, o.qty, t)
-      local px = ok and T.price(inst, o.side, o.offset)
-      if px and passive_ok(inst, o.side, px) then
-        local n = X.O.place(inst, o.side, px, o.qty, { src = "key", t_key = o.t_key, offset = o.offset, px0 = px }, t)
-        if n then
-          n.retry_of = o.tid
-          X.say(string.format("BoC-отказ: рынок сдвинулся, заявка переставлена пассивно на %s", inst:px_str(px)), "warn")
-          return
-        end
-      end
-    end
     if cls == "boc" then
       X.say("Отказ биржи: заявка стала бы тейкерской (BoC) - не исполнена", "warn")
     else
@@ -248,7 +208,7 @@ return function(X)
   end
 
   ------------------------------------------------------------------
-  -- MAINTENANCE: take-profit hygiene and auto-requote
+  -- MAINTENANCE: take-profit orders never exceed the open position
   ------------------------------------------------------------------
   local function hygiene(inst, t)
     local pos = X.M.get(inst).pos
@@ -259,42 +219,13 @@ return function(X)
         if reduce_src(w.src) and not w.want_kill then list[#list + 1] = w; total = total + (w.qty - w.filled) end
       end
       if not closing then
-        for _, w in ipairs(list) do w.replace = nil; X.O.cancel(w, "position closed", t) end
+        for _, w in ipairs(list) do X.O.cancel(w, "position closed", t) end
       else
         for i = #list, 1, -1 do                       -- newest first while closing orders exceed the position
           if total <= abs(pos) then break end
           local w = list[i]
           total = total - (w.qty - w.filled)
-          w.replace = nil
           X.O.cancel(w, "exceeds position", t)
-        end
-      end
-    end
-  end
-
-  local function requote(inst, t)
-    local min_life = (X.cfg.REQUOTE_MIN_LIFE_MS or 300) / 1000
-    for _, o in ipairs(X.O.working(inst)) do
-      local can = o.src == "key" or o.src == "requote" or o.src == "flat" or (o.src == "tp" and X.cfg.REQUOTE_TP)
-      if can and o.state == "ACTIVE" and not o.want_kill and t - (o.t_active or o.t_send) >= min_life then
-        local target
-        if o.src == "flat" then target = T.edge_price(inst, o.side)
-        elseif o.src == "tp" then target = nil
-        else target = T.price(inst, o.side, o.offset) end
-        if target then
-          -- diff > 0: our order is more aggressive than the rule wants now (the market moved away under us)
-          local diff = (o.side == "B") and (o.px - target) or (target - o.px)
-          if diff >= (X.cfg.REQUOTE_AGGR_TICKS or 1) or -diff >= (X.cfg.REQUOTE_CHASE_TICKS or 1) then
-            local chase = (o.side == "B") and (target - o.px0) or (o.px0 - target)
-            local lim = X.cfg.REQUOTE_MAX_CHASE_TICKS or 0
-            if lim > 0 and chase > lim and o.src ~= "flat" then
-              X.O.cancel(o, "chase limit", t)
-              X.say(string.format("Цена ушла на %d тиков от первой цены - заявка снята, не догоняем", chase), "warn")
-            else
-              o.replace = { src = (o.src == "flat") and "flat" or "requote", offset = o.offset, px0 = o.px0 }
-              X.O.cancel(o, "requote", t)
-            end
-          end
         end
       end
     end
@@ -305,7 +236,6 @@ return function(X)
     if not inst then return end
     if X.panic then T.panic_tick(t) end
     hygiene(inst, t)
-    if X.st.requote and inst.bk.valid and not (X.panic and X.panic.stage ~= "done") then requote(inst, t) end
   end
 
   ------------------------------------------------------------------
@@ -329,7 +259,7 @@ return function(X)
   local function panic_cancel(inst, t)
     local left = 0
     for _, o in ipairs(X.O.working(inst)) do
-      if o.mode ~= "taker" then o.replace = nil; X.O.cancel(o, "panic", t); left = left + 1 end
+      if o.mode ~= "taker" then X.O.cancel(o, "panic", t); left = left + 1 end
     end
     if (X.cfg.PANIC_KILL_SCOPE or "own") == "account" then
       for _, row in ipairs(X.O.active_rows(inst)) do X.O.kill_row(inst, row, t); left = left + 1 end

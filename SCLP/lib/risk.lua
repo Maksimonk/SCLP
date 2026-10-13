@@ -1,5 +1,5 @@
 -- risk.lua : pre-trade checks, trading pauses, daily loss auto-stop, order-rate and OTR warnings.
--- Position-increasing orders (arrow keys, requotes) pass every check. Position-reducing orders (take-profit,
+-- Position-increasing orders (arrow keys) pass every check. Position-reducing orders (take-profit,
 -- passive flatten) skip the position, spread, pause-window and rate checks. PANIC skips all of them.
 return function(X)
   local R = {}
@@ -139,7 +139,7 @@ return function(X)
     local otr = X.M.otr()
     if st.sent >= 50 and otr > (X.cfg.OTR_WARN or 20) and t - t_warn_otr > 300 then
       t_warn_otr = t
-      U.alert(string.format("order-to-trade ratio %.1f (transactions per fill) is high - fewer requotes/cancels", otr), 2)
+      U.alert(string.format("order-to-trade ratio %.1f (transactions per fill) is high - fewer cancels", otr), 2)
     end
     local pm = X.O.orders_last_min(t)
     if pm >= 0.8 * (X.cfg.MAX_ORDERS_PER_MIN or 60) and t - t_warn_rate > 60 then

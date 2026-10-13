@@ -14,7 +14,6 @@ return {
   QTY = 1,
   TP_TICKS = 0,                -- take-profit distance (0 = off); T toggles between 0 and the last value
   TP_TICKS_DEFAULT = 2,
-  REQUOTE = true,              -- auto-requote of key orders (R toggles)
   SKEW = false,                -- inventory skew (K toggles)
   MAX_POS = 5,                 -- position limit, lots (worst case: all working orders fill)
   MAX_DAY_LOSS_RUB = 3000,     -- session equity (realized + open, net of fees) <= -N -> stop (+ PANIC)
@@ -25,7 +24,7 @@ return {
   HARD_MAX_POS = 50,
   MAX_ORDER_QTY = 20,
   OFFSET_MAX = 50,
-  MAX_ORDERS_PER_MIN = 60,     -- new orders in a rolling minute (requotes included)
+  MAX_ORDERS_PER_MIN = 60,     -- new orders in a rolling minute (take-profits included)
   MAX_TX_PER_SEC = 20,         -- transactions per second (MOEX login base: 30)
   KEY_COOLDOWN_MS = 250,       -- one order per side per N ms (keyboard auto-repeat)
   OTR_WARN = 20,               -- warn above N transactions (orders + cancels) per fill
@@ -37,8 +36,6 @@ return {
   -- Verified for FORTS with this broker (reject [GW][82]); for other classes run SCLP/tools/probe_passive.lua first.
   ------------------------------------------------------------------
   CHECK_PASSIVE_FLAG = true,   -- first accepted order of each class must show orders.passive_only_order <> 0, else HALT
-  BOC_RETRY_MS = 400,          -- key order rejected by BoC (book moved before it arrived): re-price once, still passive,
-                               -- if the key was pressed less than N ms ago (0 = off)
   TX_BY_CLASS = {},            -- per-class field name overrides, e.g. { TQBR = { COND = "Тип по остатку" } }
   TX = {                       -- universal-format field names: as in the order entry dialog of YOUR QUIK
     ACTION = "Ввод заявки",
@@ -53,15 +50,6 @@ return {
     COMMENT = nil,             -- e.g. "Комментарий" - ONLY after checking with a .tri file: an unknown field = reject
   },
   ORDER_TAG = "SCLP",          -- COMMENT of fixed-format orders (orders.brokerref): finds SCLP orders after a restart
-
-  ------------------------------------------------------------------
-  -- AUTO-REQUOTE (cancel -> confirmed -> new; MOVE_ORDERS is not used: its interplay with BoC is unverified)
-  ------------------------------------------------------------------
-  REQUOTE_AGGR_TICKS = 1,      -- our order became N ticks MORE aggressive than the offset rule (support under it left)
-  REQUOTE_CHASE_TICKS = 1,     -- our order is N ticks BEHIND the rule (market moved away)
-  REQUOTE_MAX_CHASE_TICKS = 5, -- do not chase more than N ticks from the first price: cancel instead (0 = no limit)
-  REQUOTE_MIN_LIFE_MS = 300,   -- do not touch an order younger than N ms (queue priority, OTR)
-  REQUOTE_TP = false,          -- take-profit orders stay where they are
 
   SKEW_TICKS_PER_LOT = 0.5,    -- quotes shift by -N * position ticks (long -> both quotes lower)
 
