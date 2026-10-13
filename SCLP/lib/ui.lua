@@ -464,7 +464,7 @@ return function(X)
       vals[X.edit.id] = "> " .. X.edit.buf .. "_"
     end
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
-    vals.offset = vals.offset or string.format("%d  (покупка = бид+%d, продажа = аск-%d)", st.offset, st.offset, st.offset)
+    vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
     vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрывающие, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"

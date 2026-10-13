@@ -132,33 +132,34 @@ key(109)                                          -- numpad minus
 check(SCLP.st.qty == 1, "numpad minus")
 key(UP); SIM.run(0.2)
 local b = live("B")
-check(#b == 2 and b[2].px == 7001, "second buy improves to 70.01 (bid + 1)")
+check(#b == 2 and b[1].px == 6999, "offset 1: buy = bid 70.00 - 1 = 69.99 (cheaper)")
 SIM.run(0.3)
 key(UP); SIM.run(0.2)
 b = live("B")
-check(#b == 3 and b[3].px == 7001, "own order excluded from the book: no pennying ourselves (still 70.01)")
+check(#b == 3 and b[2].px == 6999, "again 69.99: measured from the bid as QUIK shows it")
 local lat = SCLP.M.lat.key_send
 check(#lat >= 3, "key -> send latency recorded")
 check(#SCLP.M.lat.send_reply >= 3, "send -> reply latency recorded")
 
 ------------------------------------------------------------------
-T_("TEST 3: no position limit, offset clamped to ask - 1")
+T_("TEST 3: no position limit; offset goes deeper: buy = bid - N, sell = ask + N")
 SIM.run(0.3)
 key(UP); SIM.run(0.2)
 check(#live("B") == 4, "4th buy accepted: no position limit")
 key(67)                                           -- C: cancel all
 SIM.run(0.3)
 check(#live() == 0, "C cancels everything")
-for _ = 1, 6 do key(RIGHT) end                     -- offset +7 > spread
+for _ = 1, 6 do key(RIGHT) end                     -- offset 7
 SIM.run(0.3)
 key(UP); SIM.run(0.2)
-check(live("B")[1] and live("B")[1].px == 7002, "too large offset clamped to ask - 1 = 70.02 (still passive)")
+check(live("B")[1] and live("B")[1].px == 6993, "buy = 70.00 - 7 = 69.93")
 key(DOWN); SIM.run(0.2)
-check(live("S")[1] and live("S")[1].px == 7003, "sell kept above our own buy 70.02 (self-cross guard): 70.03")
+check(live("S")[1] and live("S")[1].px == 7010, "sell = 70.03 + 7 = 70.10")
+key(LEFT); key(LEFT); SIM.run(0.3)
+key(DOWN); SIM.run(0.2)
+check(live("S")[1] and live("S")[1].px == 7008, "after two LEFT presses offset 5: sell = 70.03 + 5 = 70.08")
 key(66); SIM.run(0.3)                              -- B: cancel buys
 check(#live("B") == 0, "B cancels buys")
-key(DOWN); SIM.run(0.2)
-check(live("S")[1] and live("S")[1].px == 7001, "sell with offset +7 clamped to bid + 1 = 70.01")
 key(83); SIM.run(0.3)                              -- S
 check(#live("S") == 0, "S cancels sells")
 for _ = 1, 7 do key(LEFT) end
@@ -235,16 +236,14 @@ check(mx().pos == 0, "flat again")
 ------------------------------------------------------------------
 T_("TEST 6: BoC reject when the book moves before the order arrives - no automatic re-price")
 reset_book()
-key(RIGHT); key(RIGHT)                            -- offset +2 -> buy 70.02
-key(UP)
-SIM.set("BMX6", "S", 7002, 3)                     -- ask drops to 70.02 within the 100 ms latency
+key(UP)                                           -- offset 0 -> buy 70.00
+SIM.set("BMX6", "S", 7000, 3)                     -- ask drops to 70.00 within the 100 ms latency
 SIM.run(0.3)
 check(SCLP.O.st.rej_boc == 1, "exchange rejected the would-be taker (BoC)")
 check(mx().pos == 0, "no fill")
 check(#live("B") == 0, "nothing re-sent automatically")
 check((SCLP.last_msg or ""):find("тейкер", 1, true) ~= nil, "user notified")
-SIM.set("BMX6", "S", 7002, 0)
-key(LEFT); key(LEFT)
+SIM.set("BMX6", "S", 7000, 0)
 SIM.run(0.3)
 
 ------------------------------------------------------------------

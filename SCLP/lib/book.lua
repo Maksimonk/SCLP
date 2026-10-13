@@ -12,8 +12,9 @@ return function(X)
                 spread_avg = nil, t_spread = nil, t_change = nil, t_read = nil }
   end
 
+  -- returns the side without our volume, and the best price as QUIK shows it (our orders included)
   local function parse(arr, cnt, inst, desc, own)
-    local out = {}
+    local out, shown = {}, nil
     if type(arr) ~= "table" then return out end
     local n = tonumber(cnt) or #arr
     local i0, i1, step = 1, n, 1
@@ -24,12 +25,13 @@ return function(X)
         local p, q = U.num(e.price), U.num(e.quantity)
         if p and q and q > 0 then
           local idx = floor(p / inst.tick + 0.5)
+          shown = shown or idx
           local mine = own and own[idx] or 0
           if q - mine > 0 then out[#out + 1] = { p = idx, q = q - mine } end
         end
       end
     end
-    return out
+    return out, shown
   end
 
   -- read the book now; returns bk (bk.valid = false if a side is empty or the book is crossed)
@@ -40,8 +42,9 @@ return function(X)
     local ok, q = pcall(getQuoteLevel2, inst.class, inst.sec)
     if not ok or type(q) ~= "table" then bk.valid = false; return bk end
     local own = X.O.own_levels(inst)
-    local bids = parse(q.bid, q.bid_count, inst, true, own.B)
-    local asks = parse(q.offer, q.offer_count, inst, false, own.S)
+    local bids, sbb = parse(q.bid, q.bid_count, inst, true, own.B)
+    local asks, sba = parse(q.offer, q.offer_count, inst, false, own.S)
+    bk.shown_bb, bk.shown_ba = sbb, sba            -- best prices exactly as in the QUIK order book
     local b1, a1 = bids[1], asks[1]
     local sig = (b1 and b1.p or -1) .. ":" .. (b1 and b1.q or 0) .. ":" .. (a1 and a1.p or -1) .. ":" .. (a1 and a1.q or 0)
     if sig ~= bk.sig then bk.sig = sig; bk.t_change = t end

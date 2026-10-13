@@ -3,16 +3,12 @@
 -- market by its offset rule, but never to a price where the close would lose money (break-even = FIFO entry price of
 -- the lots it closes + entry and exit fees). Opening orders and take-profits always stay where you put them.
 --
--- OFFSET (ticks, signed) is applied to OUR OWN side of the book, measured on the book WITHOUT our orders:
---   BUY  price = best bid + offset        SELL price = best ask - offset
---   offset >= 0 only: 0 joins the best level, > 0 improves inside the spread.
--- Then the price is capped so the order can never take liquidity:
+-- OFFSET (ticks, >= 0) is measured from the best price of OUR side exactly as the QUIK order book shows it
+-- (our own orders included), away from the market:
+--   BUY  price = best bid - offset   (buy cheaper)        SELL price = best ask + offset   (sell dearer)
+--   offset 0 joins the best level. The order always rests deeper or at the best price, so it is passive by itself;
+-- the cap below is only a safety net (crossed book, our own opposite orders):
 --   BUY  <= best ask - 1  and  < our lowest sell        SELL >= best bid + 1  and  > our highest buy
--- (the second half prevents a cross-trade with ourselves, which MOEX rejects and counts as an erroneous transaction).
--- Why the own side: anchoring a sell on the bid (bid + offset) makes offset 0 a taker and offset 1 a join or an
--- improvement depending on the spread width - the same key would mean different things on every tick.
--- With the own-side anchor offset keeps one meaning (queue position relative to the competition) and a too large
--- offset degrades gracefully to "most aggressive passive price".
 return function(X)
   local T = {}
   X.T = T
@@ -31,11 +27,15 @@ return function(X)
   end
 
   -- passive price for a side: px, note | nil, reason
-  function T.price(inst, side, offset)
+  -- net = true: measure from the book without our orders (a requoted order must not follow itself)
+  function T.price(inst, side, offset, net)
     local bk = inst.bk
     if not bk.valid then return nil, "нет стакана" end
-    offset = math.max(0, offset or 0)                          -- never behind the best price
-    local px = (side == "B") and (bk.bb + offset) or (bk.ba - offset)
+    offset = math.max(0, offset or 0)
+    local best
+    if net then best = (side == "B") and bk.bb or bk.ba
+    else best = (side == "B") and (bk.shown_bb or bk.bb) or (bk.shown_ba or bk.ba) end
+    local px = (side == "B") and (best - offset) or (best + offset)
     px = px - T.skew(inst)
     local cap = X.B.passive_cap(inst, side)
     local note
@@ -86,8 +86,8 @@ return function(X)
     local o, err = X.O.place(inst, side, px, qty, { src = "key", t_key = t_key, offset = offset, px0 = px }, t)
     if not o then X.say("Не отправлена: " .. tostring(err), "warn"); return end
     X.M.on_send(o)
-    X.say(string.format("%s %d @ %s (%s%+d)%s", side == "B" and "ПОКУПКА" or "ПРОДАЖА", qty, inst:px_str(px),
-      side == "B" and "бид" or "аск", side == "B" and offset or -offset, note and (", " .. note) or ""))
+    X.say(string.format("%s %d @ %s (%s%s%d)%s", side == "B" and "ПОКУПКА" or "ПРОДАЖА", qty, inst:px_str(px),
+      side == "B" and "бид" or "аск", side == "B" and "-" or "+", offset, note and (", " .. note) or ""))
   end
 
   -- passive flatten: one closing order at the most aggressive passive price (not moved afterwards)
@@ -198,7 +198,7 @@ return function(X)
   -- target of a closing order: offset rule (or the most aggressive passive price for F), floored at break-even
   local function close_target(inst, o, q)
     local side = o.side
-    local px = (o.src == "flat") and T.edge_price(inst, side) or T.price(inst, side, o.offset or 0)
+    local px = (o.src == "flat") and T.edge_price(inst, side) or T.price(inst, side, o.offset or 0, true)
     if not px then return nil end
     local be = X.M.breakeven(inst, side, q)
     if not be then return nil end
