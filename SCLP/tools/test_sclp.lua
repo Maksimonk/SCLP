@@ -206,23 +206,29 @@ local kills2 = 0
 for _, tx in ipairs(SIM.sent) do if tx.ACTION == "KILL_ORDER" then kills2 = kills2 + 1 end end
 check(kills2 == kills + 1, "the only cancel is the user's C")
 
-T_("TEST 5b: a closing order follows the market but never below break-even")
+T_("TEST 5b: arrow-key orders never move; the F close follows the market only at break-even or better")
 reset_book()
 SCLP.st.tp, SCLP.st.requote = 0, true
 key(UP); SIM.run(0.2)
 SIM.trade("BMX6", -1, 7000, 30); SIM.run(0.3)       -- long 1 @ 70.00
 check(mx().pos == 1, "long 1")
-key(DOWN); SIM.run(0.5)                              -- sell at best ask 70.03
-check(live("S")[1] and live("S")[1].px == 7003, "closing sell at 70.03")
+SIM.book("BMX6", { { 7000, 10 } }, { { 7003, 10 } }); SIM.run(0.3)
+key(DOWN); SIM.run(0.3)                              -- an extra quote with the arrow key: sell 70.03
+SIM.book("BMX6", { { 7004, 10 } }, { { 7007, 10 } }); SIM.run(1.5)
+check(live("S")[1] and live("S")[1].px == 7003, "arrow-key sell is never moved (even with R on and a position open)")
+key(67); SIM.run(0.3)
+SIM.book("BMX6", { { 7000, 10 } }, { { 7003, 10 } }); SIM.run(0.3)
+char(string.byte("f")); SIM.run(0.3)                 -- F: passive close at bid + 1 = 70.01
+check(live("S")[1] and live("S")[1].px == 7001, "F close at 70.01")
 SIM.book("BMX6", { { 6997, 10 } }, { { 6999, 10 } })  -- market falls through our entry
 SIM.run(1.5)
 local cs = live("S")[1]
--- break-even: 70.00 + (0.50 entry + 0.50 exit fee) / 0.80 RUB per tick = 70.0125: the market (69.99) is worse
-check(cs and cs.px == 7003, "market below break-even: the sell is NOT moved (stays 70.03), got " .. tostring(cs and cs.px))
-SIM.book("BMX6", { { 7003, 10 } }, { { 7005, 10 } })  -- market rises
+-- break-even: 70.00 + (0.50 entry + 0.50 exit fee) / 0.80 RUB per tick = 70.0125: the market (69.98) is worse
+check(cs and cs.px == 7001, "market below break-even: the F close is NOT moved (stays 70.01), got " .. tostring(cs and cs.px))
+SIM.book("BMX6", { { 7004, 10 } }, { { 7006, 10 } })  -- market rises
 SIM.run(1.5)
 cs = live("S")[1]
-check(cs and cs.px == 7005, "sell follows the market up to 70.05")
+check(cs and cs.px == 7005, "F close follows the market up to bid + 1 = 70.05, got " .. tostring(cs and cs.px))
 key(82)                                              -- R off
 SIM.book("BMX6", { { 7006, 10 } }, { { 7008, 10 } })
 SIM.run(1.5)

@@ -30,7 +30,7 @@ return function(X)
     { id = "offset", label = "Отступ, тиков [Влево/Вправо]", edit = "int" },
     { id = "qty", label = "Объём, лотов [+/-]", edit = "int" },
     { id = "tp", label = "Тейк-профит, тиков [T]", edit = "int" },
-    { id = "requote", label = "Перестановка закрытия [R]" },
+    { id = "requote", label = "Перестановка закрытия F [R]" },
     { id = "skew", label = "Перекос от позиции [K]" },
     { id = "max_pos", label = "Лимит позиции" },
     { id = "max_loss", label = "Лимит убытка дня, руб", edit = "num" },
@@ -467,7 +467,7 @@ return function(X)
     vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
     vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
-    vals.requote = st.requote and "ВКЛ: только закрывающие, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
+    vals.requote = st.requote and "ВКЛ: только закрытие по F, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"
     vals.max_loss = vals.max_loss or tostring(st.max_loss)
@@ -477,7 +477,7 @@ return function(X)
     vals.msg = X.last_msg or ""
     vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, + / - - объём"
     vals.keys2 = "B/S - снять покупки/продажи, C или Esc - снять все, F - закрыть пассивно, H - пауза"
-    vals.keys3 = "R - перестановка закрытия, T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
+    vals.keys3 = "R - перестановка закрытия F, T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
     local R = {}
     if inst then
       local bk = inst.bk

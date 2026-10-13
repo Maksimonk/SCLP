@@ -1,7 +1,7 @@
 -- trader.lua : what the keys do. Passive pricing, take-profit, passive flatten, PANIC.
--- Orders are not moved by the script, with ONE exception (R toggles it): an order that CLOSES the position follows the
--- market by its offset rule, but never to a price where the close would lose money (break-even = FIFO entry price of
--- the lots it closes + entry and exit fees). Opening orders and take-profits always stay where you put them.
+-- Orders placed with the arrow keys are NEVER moved (you may quote both sides on purpose). The ONE exception
+-- (R toggles it): the passive close placed with F follows the market, only to prices at break-even or better
+-- (average price of the position + entry and exit fees); otherwise it stays. Take-profits never move.
 --
 -- OFFSET (ticks, >= 0) is measured from the best price of OUR side exactly as the QUIK order book shows it
 -- (our own orders included), away from the market:
@@ -219,7 +219,7 @@ return function(X)
     local min_life = (X.cfg.REQUOTE_MIN_LIFE_MS or 300) / 1000
     for _, o in ipairs(X.O.working(inst)) do
       local is_close, pos = closing(inst, o.side)
-      if is_close and (o.src == "key" or o.src == "flat") and o.state == "ACTIVE" and not o.want_kill
+      if is_close and o.src == "flat" and o.state == "ACTIVE" and not o.want_kill
          and t - (o.t_active or o.t_send) >= min_life then
         local target = close_target(inst, o, math.min(o.qty - o.filled, pos))
         if target and target ~= o.px then
