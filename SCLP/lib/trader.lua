@@ -231,6 +231,12 @@ return function(X)
     X.M.on_order_done(o)
     local p = X.panic
     if p and p.order == o then p.order = nil end
+    if o.mode == "taker" and o.filled > 0 then
+      local avg = o.cost / o.filled
+      U.log(string.format("[%s] PANIC fill %d @ avg %s (limit %s, best at send %s, slippage %.1f ticks)", o.inst.sec, o.filled,
+        U.fmt(avg * o.inst.tick, o.inst.scale + 2), o.inst:px_str(o.px), o.ref_px and o.inst:px_str(o.ref_px) or "-",
+        o.ref_px and ((o.side == "S") and (o.ref_px - avg) or (avg - o.ref_px)) or 0))
+    end
     if not o.replace then return end
     o.replace = nil
     local inst = o.inst
@@ -356,18 +362,21 @@ return function(X)
       end
       if t - (p.t_last or -1e9) < (cfg.PANIC_RETRY_SEC or 0.3) then return end
       X.B.read(inst, t)
+      X.I.refresh(inst, t, true)                         -- fresh exchange price limits
       local bk = inst.bk
       local side = p.left > 0 and "S" or "B"
+      -- "at market": the limit is the exchange band edge (buy at the highest allowed price, sell at the lowest).
+      -- The exchange fills against the book at the best available prices, the limit only says "any price".
+      -- Real prices are taken from the trades, never from this limit. Unknown band -> best +- PANIC_SLIP_TICKS.
       local slip = cfg.PANIC_SLIP_TICKS or 20
       local px
-      if side == "S" then px = bk.bb and (bk.bb - slip) or inst.pmin
-      else px = bk.ba and (bk.ba + slip) or inst.pmax end
-      if not px then U.log_every("panic_px", 5, "[" .. inst.sec .. "] PANIC: no opposite side in the book, waiting"); return end
-      if inst.pmin and px < inst.pmin then px = inst.pmin end
-      if inst.pmax and px > inst.pmax then px = inst.pmax end
+      if side == "S" then px = inst.pmin or (bk.bb and bk.bb - slip)
+      else px = inst.pmax or (bk.ba and bk.ba + slip) end
+      if not px then U.log_every("panic_px", 5, "[" .. inst.sec .. "] PANIC: no price limits and no opposite side, waiting"); return end
       p.t_last = t
       p.attempts = p.attempts + 1
       local o = X.O.place(inst, side, px, abs(p.left), { taker = true, src = "panic" }, t)
+      if o then o.ref_px = (side == "S") and bk.bb or bk.ba end    -- best opposite price at send (slippage, estimates)
       p.order = o
       if o then U.log(string.format("[%s] PANIC IOC %s %d @ %s (attempt %d)", inst.sec, side, abs(p.left), inst:px_str(px), p.attempts)) end
     end

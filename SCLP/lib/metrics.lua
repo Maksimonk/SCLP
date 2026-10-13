@@ -196,10 +196,11 @@ return function(X)
   function M.on_order_done(o)
     local inst = o.inst
     U.csv("sclp_orders", "date,time,sec,tid,side,price,qty,filled,src,mode,state,key_to_send_ms,send_to_reply_ms," ..
-      "send_to_active_ms,life_ms,reject",
+      "send_to_active_ms,life_ms,avg_fill_price,reject",
       table.concat({ U.date("%Y-%m-%d", o.t_send0), U.stamp(o.t_send0), inst.sec, o.tid, o.side, inst:px_str(o.px), o.qty,
         o.filled, o.src, o.mode, o.state, ms(o.t_key, o.t_send), ms(o.t_send, o.t_reply), ms(o.t_send, o.t_active),
-        ms(o.t_send, o.t_done), ((o.reject_msg or ""):gsub("[,\r\n]", " ")) }, ","))
+        ms(o.t_send, o.t_done), (o.filled > 0 and o.cost) and (U.fmt(o.cost / o.filled * inst.tick, inst.scale + 2) .. (o.estimated and "?" or "")) or "",
+        ((o.reject_msg or ""):gsub("[,\r\n]", " ")) }, ","))
   end
 
   local HDR = "date,time,sec,side,qty,price,src,mode,tid,order_price,spread_ticks,sigma_ticks,mid,pos_after,avg_after," ..

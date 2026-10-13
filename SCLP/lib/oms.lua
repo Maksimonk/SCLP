@@ -352,9 +352,11 @@ return function(X)
     O.fill(o, q, px, t, tn)
   end
 
+  -- o.cost / o.filled = the real average fill price (VWAP over trades); the order's own price is only its limit
   function O.fill(o, q, px, t, tn)
     if q <= 0 then return end
     o.filled = o.filled + q
+    o.cost = (o.cost or 0) + px * q
     o.t_fill = o.t_fill or t
     O.st.fills = O.st.fills + 1
     O.st.fill_qty = O.st.fill_qty + q
@@ -384,6 +386,16 @@ return function(X)
       end
     end
     return nil
+  end
+
+  -- trades of an order from the trades table that OnTrade did not deliver (idempotent by trade number)
+  function O.scan_trades(o, t)
+    if not getNumberOf or not o.key then return end
+    local n = getNumberOf("trades") or 0
+    for i = n - 1, math.max(0, n - 5000), -1 do
+      local tr = getItem("trades", i)
+      if tr and U.key_from_num(tr.order_num) == o.key then O.on_trade(tr, t) end
+    end
   end
 
   -- active rows of the instrument on our account: { row, own = bool }
@@ -438,12 +450,20 @@ return function(X)
     for id, w in pairs(O.await) do
       local o = w.o
       if settled(o) then O.await[id] = nil; emit("done", o, t)
-      elseif t - w.t > 10 then
+      elseif t - w.t > 5 and not w.scanned then
+        -- trades were not delivered by OnTrade: take them (with their real prices) from the trades table
+        w.scanned = true
+        O.scan_trades(o, t)
+        if settled(o) then O.await[id] = nil; emit("done", o, t) end
+      elseif t - w.t > 60 then
         O.await[id] = nil
         local rest = o.exec_by_table - o.filled
-        U.alert(string.format("[%s] tid=%d: executed %d by orders table, no trades in 10 s - booked at order price",
-          o.inst.sec, o.tid, rest), 2)
-        O.fill(o, rest, o.px, t)
+        -- last resort, flagged: a maker fills at its own price; a taker at the best price seen at send time
+        local px = (o.mode == "taker" and o.ref_px) or o.px
+        o.estimated = true
+        U.alert(string.format("[%s] tid=%d: %d lot(s) executed but no trades in 60 s - booked at ESTIMATED price %s, check the trades table",
+          o.inst.sec, o.tid, rest, o.inst:px_str(px)), 3)
+        O.fill(o, rest, px, t)
         emit("done", o, t)
       end
     end

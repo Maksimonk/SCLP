@@ -77,6 +77,10 @@ function getParamEx(class, sec, name)
   if name == "LAST" and SIM.last and SIM.last[sec] then return { param_type = "1", param_value = tostring(SIM.last[sec]) } end
   local i = SIM.info[sec]
   if not i then return { param_type = "0", param_value = "0" } end
+  if SIM.limits and SIM.limits[sec] and (name == "PRICEMIN" or name == "PRICEMAX") then
+    local l = SIM.limits[sec]
+    return { param_type = "1", param_value = string.format("%.2f", (name == "PRICEMIN" and l[1] or l[2]) * i.tick) }
+  end
   if name == "SEC_PRICE_STEP" then return { param_type = "1", param_value = tostring(i.tick) } end
   if name == "STEPPRICE" then return { param_type = "1", param_value = tostring(i.step) } end
   if name == "LAST" and SIM.last and SIM.last[sec] then return { param_type = "1", param_value = tostring(SIM.last[sec]) } end

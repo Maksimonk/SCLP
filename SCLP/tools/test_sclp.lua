@@ -253,6 +253,10 @@ SIM.run(0.3)
 check(mx().pos == 2, "long 2")
 key(DOWN); SIM.run(0.3)
 check(#live("S") == 1, "a sell is resting")
+SIM.limits = { BMX6 = { 6500, 7500 } }             -- exchange price band 65.00 .. 75.00
+SIM.book("BMX6", { { 6999, 1 }, { 6998, 5 } }, { { 7003, 10 } })   -- thin bid: the sweep goes 2 levels
+SIM.run(0.2)
+local real0 = mx().realized
 local taker_before = SIM.taker_orders or 0
 key(80)
 check(SCLP.panic == nil, "first P only arms")
@@ -260,6 +264,14 @@ key(80)
 SIM.run(3)
 check(SCLP.panic and SCLP.panic.stage == "done", "PANIC done")
 check(mx().pos == 0, "flat after PANIC")
+local ioc0
+for i = #SIM.sent, 1, -1 do if SIM.sent[i].EXECUTION_CONDITION == "KILL_BALANCE" then ioc0 = SIM.sent[i]; break end end
+check(ioc0 and ioc0.PRICE == "65.00", "market sell limit = lower band edge 65.00, got " .. tostring(ioc0 and ioc0.PRICE))
+-- real fills: 1 @ 69.99 + 1 @ 69.98 against entry 2 @ 70.00 -> (-1 -2) ticks x 0.80 = -2.40, not the 65.00 limit
+check(math.abs((mx().realized - real0) - (-2.4)) < 1e-9, "P&L from real trade prices: -2.40, got " .. (mx().realized - real0))
+local po = SCLP.O.by_tid[tonumber(ioc0.TRANS_ID)]
+check(po and math.abs(po.cost / po.filled - 6998.5) < 1e-9, "order VWAP 69.985 from trades")
+SIM.limits = nil
 check(#live() == 0, "no resting orders")
 check((SIM.taker_orders or 0) - taker_before >= 1, "IOC (KILL_BALANCE) taker order used")
 local ioc = SIM.sent[#SIM.sent]
@@ -478,6 +490,22 @@ check(o12.uncertain and not o12.done, "status 12: state unknown, not rejected")
 SIM.run(0.3)
 check(o12.state == "ACTIVE" and not o12.uncertain, "the order became ACTIVE from the real reply / orders table")
 key(67); SIM.run(0.3)
+
+------------------------------------------------------------------
+T_("TEST 19: a lost OnTrade is recovered from the trades table with the real price")
+SIM.book("BRX6", { { 6500, 10 } }, { { 6502, 10 } })
+SIM.run(0.2)
+local p0 = mx().pos
+key(UP); SIM.run(0.3)                              -- buy at 65.00 behind 10 lots
+local saved_ot = OnTrade
+OnTrade = nil                                      -- QUIK "loses" the trade callback
+SIM.trade("BRX6", -1, 6500, 11); SIM.run(0.2)
+OnTrade = saved_ot
+check(mx().pos == p0, "no OnTrade yet: position not changed")
+SIM.run(6)
+check(mx().pos == p0 + 1, "trade taken from the trades table after 5 s")
+local lot = mx().lots[#mx().lots]
+check(lot and lot.px == 6500, "booked at the real trade price 65.00")
 
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))
