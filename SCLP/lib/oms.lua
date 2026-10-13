@@ -209,9 +209,16 @@ return function(X)
     send_kill(o, t)
   end
 
+  -- iterate over a snapshot: callbacks fired inside may add orders to O.live ("invalid key to 'next'")
+  local function live_list()
+    local r = {}
+    for _, o in pairs(O.live) do r[#r + 1] = o end
+    return r
+  end
+
   function O.cancel_where(inst, pred, why, t)
     local n = 0
-    for _, o in pairs(O.live) do
+    for _, o in ipairs(live_list()) do
       if o.inst == inst and not o.want_kill and (not pred or pred(o)) then O.cancel(o, why, t); n = n + 1 end
     end
     return n
@@ -448,9 +455,13 @@ return function(X)
   function O.tick(t)
     local cfg = X.cfg
     gc(t)
-    for id, w in pairs(O.await) do
+    local aw = {}
+    for id, w in pairs(O.await) do aw[#aw + 1] = { id, w } end
+    for _, e in ipairs(aw) do
+      local id, w = e[1], e[2]
       local o = w.o
-      if settled(o) then O.await[id] = nil; emit("done", o, t)
+      if O.await[id] ~= w then                      -- already resolved by an event fired in this loop
+      elseif settled(o) then O.await[id] = nil; emit("done", o, t)
       elseif t - w.t_scan >= 1 then
         -- executed by the orders table, trades not booked yet: read them (real prices) from the trades table.
         -- Never booked at an assumed price - the position waits for the real trades.
@@ -464,7 +475,7 @@ return function(X)
         end
       end
     end
-    for _, o in pairs(O.live) do
+    for _, o in ipairs(live_list()) do
       if o.state == "SENT" and (o.uncertain or t - o.t_send0 > (cfg.PENDING_LOST_SEC or 10)) then
         if not o.lookup_at or t >= o.lookup_at then
           o.lookup_at = t + 1

@@ -134,7 +134,7 @@ return function(X)
     local m = X.M.get(inst)
     local function px(v) return v and U.fmt(v * inst.tick, inst.scale + 2) or "-" end
     local side = m.pos > 0 and "S" or "B"
-    local be = m.pos ~= 0 and X.M.breakeven(inst, side, math.abs(m.pos)) or nil
+    local be = m.pos ~= 0 and X.M.breakeven(inst, side) or nil
     local vals = {
       tostring(m.bought), m.bought > 0 and px((m.buy_cost or 0) / m.bought) or "-",
       tostring(m.sold), m.sold > 0 and px((m.sell_cost or 0) / m.sold) or "-",

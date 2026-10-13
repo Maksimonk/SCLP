@@ -217,8 +217,8 @@ check(live("S")[1] and live("S")[1].px == 7003, "closing sell at 70.03")
 SIM.book("BMX6", { { 6997, 10 } }, { { 6999, 10 } })  -- market falls through our entry
 SIM.run(1.5)
 local cs = live("S")[1]
--- break-even: 70.00 + (0.50 entry + 0.50 exit fee) / 0.80 RUB per tick = 70.0125 -> 70.02
-check(cs and cs.px == 7002, "sell pulled down only to break-even 70.02 (not 69.99), got " .. tostring(cs and cs.px))
+-- break-even: 70.00 + (0.50 entry + 0.50 exit fee) / 0.80 RUB per tick = 70.0125: the market (69.99) is worse
+check(cs and cs.px == 7003, "market below break-even: the sell is NOT moved (stays 70.03), got " .. tostring(cs and cs.px))
 SIM.book("BMX6", { { 7003, 10 } }, { { 7005, 10 } })  -- market rises
 SIM.run(1.5)
 cs = live("S")[1]
@@ -232,6 +232,23 @@ reset_book()
 key(DOWN); SIM.run(0.3)
 SIM.trade("BMX6", 1, 7003, 20); SIM.run(0.3)
 check(mx().pos == 0, "flat again")
+-- several entries: break-even is the position AVERAGE, a closing order is never pushed away from the market
+SIM.book("BMX6", { { 7000, 10 } }, { { 7003, 10 } }); SIM.run(0.3)
+key(DOWN); SIM.run(0.3); SIM.trade("BMX6", 1, 7003, 20); SIM.run(0.3)    -- short 1 @ 70.03
+SIM.book("BMX6", { { 7010, 10 } }, { { 7013, 10 } }); SIM.run(0.3)
+key(DOWN); SIM.run(0.3); SIM.trade("BMX6", 1, 7013, 20); SIM.run(0.3)    -- short 1 @ 70.13, avg 70.08
+check(mx().pos == -2, "short 2, avg 70.08")
+SIM.book("BMX6", { { 7006, 10 } }, { { 7009, 10 } }); SIM.run(0.3)
+key(UP); SIM.run(1.5)                                                      -- closing buy at bid 70.06
+local cb = live("B")[1]
+check(cb and cb.px == 7006, "closing buy stays at 70.06 (old code dragged it to the oldest lot 70.03), got " .. tostring(cb and cb.px))
+key(67); SIM.run(0.3)
+SIM.book("BMX6", { { 7000, 10 } }, { { 7003, 10 } }); SIM.run(0.3)
+for _ = 1, 2 do
+  SIM.book("BMX6", { { 7000, 10 } }, { { 7003, 10 } }); SIM.run(0.3)
+  key(UP); SIM.run(0.3); SIM.trade("BMX6", -1, 7000, 20); SIM.run(0.3)
+end
+check(mx().pos == 0, "flat again (2)")
 
 ------------------------------------------------------------------
 T_("TEST 6: BoC reject when the book moves before the order arrives - no automatic re-price")

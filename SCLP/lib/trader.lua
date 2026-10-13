@@ -200,9 +200,12 @@ return function(X)
     local side = o.side
     local px = (o.src == "flat") and T.edge_price(inst, side) or T.price(inst, side, o.offset or 0, true)
     if not px then return nil end
-    local be = X.M.breakeven(inst, side, q)
+    local be = X.M.breakeven(inst, side)
     if not be then return nil end
-    if side == "S" then px = math.max(px, math.ceil(be - 1e-9)) else px = math.min(px, math.floor(be + 1e-9)) end
+    -- the order only follows the market while the new price closes at break-even or better; otherwise it is NOT
+    -- moved at all and stays where you put it (it is never pushed away from the market towards break-even)
+    if side == "S" and px < be - 1e-9 then return nil end
+    if side == "B" and px > be + 1e-9 then return nil end
     if not X.I.in_limits(inst, px) or not passive_ok(inst, side, px) then return nil end
     return px
   end
@@ -249,7 +252,7 @@ return function(X)
     if not px then return end
     local n = X.O.place(inst, o.side, px, rem, { src = o.src, offset = o.offset, px0 = o.px0 }, t)
     if n then U.log(string.format("[%s] REQUOTE close %s %s -> %s (break-even %s)", inst.sec, o.side, inst:px_str(o.px),
-      inst:px_str(px), U.fmt(X.M.breakeven(inst, o.side, rem) * inst.tick, inst.scale + 2))) end
+      inst:px_str(px), U.fmt((X.M.breakeven(inst, o.side) or 0) * inst.tick, inst.scale + 2))) end
   end
 
   function T.on_reject(o, msg, cls)

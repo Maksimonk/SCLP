@@ -102,22 +102,18 @@ return function(X)
     return closed_net, lot
   end
 
-  -- break-even price (tick index, fractional) of closing q lots on `side` against the oldest open lots (FIFO):
-  -- entry fees of those lots + the maker fee of the closing fill are covered. nil if there is nothing to close.
-  function M.breakeven(inst, side, q)
+  -- break-even price (tick index, fractional) of closing the position on `side`: the AVERAGE price of the whole
+  -- open position + its entry fees per lot + the maker fee of the closing fill. (Not the oldest FIFO lot: with
+  -- several entries at different prices the oldest one would pull every closing order far from the market.)
+  -- nil if the side does not close the position.
+  function M.breakeven(inst, side)
     local m = M.get(inst)
-    local sgn = (side == "S") and 1 or -1                  -- a sell closes long lots
-    local left, cost, fee = q, 0, 0
-    for _, l in ipairs(m.lots) do
-      if left <= 0 or l.sgn ~= sgn then break end
-      local c = math.min(left, l.qty)
-      cost, fee, left = cost + l.px * c, fee + l.fee_unit * c, left - c
-    end
-    local n = q - left
-    if n <= 0 or not inst.point or inst.point <= 0 then return nil end
-    local px = cost / n
-    local exit_fee = M.fee(inst, n, px, false)
-    return px + sgn * (fee + exit_fee) / (n * inst.point)
+    if not m.avg or m.pos == 0 or not inst.point or inst.point <= 0 then return nil end
+    local sgn = (side == "S") and 1 or -1                  -- a sell closes a long position
+    if U.sign(m.pos) ~= sgn then return nil end
+    local n = math.abs(m.pos)
+    local exit_fee = M.fee(inst, 1, m.avg, false)
+    return m.avg + sgn * (m.open_fee / n + exit_fee) / inst.point
   end
 
   -- position change that SCLP did not trade (manual trades, downtime gaps): booked at px without fee
