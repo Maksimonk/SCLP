@@ -82,10 +82,12 @@ return function(X)
   ------------------------------------------------------------------
   local function enc(s) return U.to_cp1251(s) end
   function O.account(class) return (X.cfg.ACCOUNTS or {})[class] or X.cfg.ACCOUNT or "" end
-  function O.mode(inst) return (X.cfg.PASSIVE_MODE or {})[inst.class] or X.cfg.PASSIVE_MODE_DEFAULT or "limit" end
+  -- regular orders are always Book-or-Cancel; "taker" (IOC) is used only by PANIC
+  function O.mode() return "boc" end
+  O.passive_checked = {}       -- [class] = true after passive_only_order was confirmed
 
   function O.build_boc(inst, side, px, qty, tid)
-    local F = X.cfg.TX
+    local F = U.merge(X.cfg.TX, (X.cfg.TX_BY_CLASS or {})[inst.class])
     local t = { TRANS_ID = string.format("%d", tid), CLASSCODE = inst.class, ACTION = enc(F.ACTION) }
     t[enc(F.ACCOUNT)] = O.account(inst.class)
     t[enc(F.SIDE)] = enc(side == "B" and F.BUY or F.SELL)
@@ -159,8 +161,7 @@ return function(X)
                 parent = opt.parent, t_send0 = t }
     local tx
     if mode == "taker" then tx = O.build_limit(inst, side, px, qty, tid, "KILL_BALANCE")
-    elseif mode == "boc" then tx = O.build_boc(inst, side, px, qty, tid)
-    else tx = O.build_limit(inst, side, px, qty, tid) end
+    else tx = O.build_boc(inst, side, px, qty, tid) end
     local res = send(tx)
     o.t_send = U.now()
     O.st.sent = O.st.sent + 1
@@ -284,10 +285,10 @@ return function(X)
   end
 
   local function passive_flag_check(o, row)
-    if o.mode ~= "boc" or O.passive_checked or X.cfg.CHECK_PASSIVE_FLAG == false then return end
+    if o.mode ~= "boc" or O.passive_checked[o.inst.class] or X.cfg.CHECK_PASSIVE_FLAG == false then return end
     local v = row.passive_only_order
     if v == nil then return end
-    O.passive_checked = true
+    O.passive_checked[o.inst.class] = true
     local on = (v == true) or (tonumber(v) and tonumber(v) ~= 0) or (type(v) == "string" and v ~= "" and v ~= "0")
     U.log(string.format("[%s] orders.passive_only_order = %s", o.inst.sec, tostring(v)))
     if not on then
@@ -305,11 +306,7 @@ return function(X)
     local active = U.bit(row.flags, 0)
     local balance = U.num(row.balance) or 0
     local exec = o.qty - balance
-    if not o.row_seen then
-      o.row_seen = true
-      -- "limit" mode has no exchange guarantee: executed volume on the very first row means the order traded on entry
-      if o.mode == "limit" and exec > 0 then o.taker_suspect = true end
-    end
+    o.row_seen = true
     o.uncertain = nil
     if active then
       if o.state == "SENT" then

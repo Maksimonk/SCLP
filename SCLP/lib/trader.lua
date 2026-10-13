@@ -221,6 +221,24 @@ return function(X)
 
   function T.on_reject(o, msg, cls)
     if o.src == "panic" then X.say("PANIC: отказ - " .. msg, "err"); return end
+    -- BoC reject of a fresh key order: the book moved between the key press and the exchange. Re-price once on the
+    -- current book with the same offset - the new order is again Book-or-Cancel, so it can never take liquidity.
+    local retry_ms = X.cfg.BOC_RETRY_MS or 0
+    if cls == "boc" and o.src == "key" and not o.retry_of and retry_ms > 0 and o.t_key
+       and U.now() - o.t_key <= retry_ms / 1000 and o.inst == X.inst then
+      local inst, t = o.inst, U.now()
+      X.B.read(inst, t)
+      local ok = X.R.can_open(inst, o.side, o.qty, t)
+      local px = ok and T.price(inst, o.side, o.offset)
+      if px and passive_ok(inst, o.side, px) then
+        local n = X.O.place(inst, o.side, px, o.qty, { src = "key", t_key = o.t_key, offset = o.offset, px0 = px }, t)
+        if n then
+          n.retry_of = o.tid
+          X.say(string.format("BoC-отказ: рынок сдвинулся, заявка переставлена пассивно на %s", inst:px_str(px)), "warn")
+          return
+        end
+      end
+    end
     if cls == "boc" then
       X.say("Отказ биржи: заявка стала бы тейкерской (BoC) - не исполнена", "warn")
     else

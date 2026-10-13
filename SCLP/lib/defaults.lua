@@ -31,14 +31,15 @@ return {
   OTR_WARN = 20,               -- warn above N transactions (orders + cancels) per fill
 
   ------------------------------------------------------------------
-  -- PASSIVE-ONLY EXECUTION
-  -- "boc": universal transaction format with "Условие исполнения = Только пассивная" (exchange Book-or-Cancel).
-  --        The fixed format has no BoC value (ARQA, 17.06.2026). Verified for FORTS with this broker.
-  -- "limit": plain limit order + pre-trade book check (no exchange guarantee). Default where BoC is not verified.
+  -- PASSIVE-ONLY EXECUTION: EVERY order except PANIC goes with "Условие исполнения = Только пассивная"
+  -- (exchange Book-or-Cancel) in the universal transaction format - the fixed format has no BoC value
+  -- (ARQA, 17.06.2026). There is no plain-limit fallback: if QUIK refuses the fields, SCLP stops (HALT).
+  -- Verified for FORTS with this broker (reject [GW][82]); for other classes run SCLP/tools/probe_passive.lua first.
   ------------------------------------------------------------------
-  PASSIVE_MODE = { SPBFUT = "boc", SPBOPT = "boc" },
-  PASSIVE_MODE_DEFAULT = "limit",
-  CHECK_PASSIVE_FLAG = true,   -- first accepted BoC order must show orders.passive_only_order <> 0, otherwise HALT
+  CHECK_PASSIVE_FLAG = true,   -- first accepted order of each class must show orders.passive_only_order <> 0, else HALT
+  BOC_RETRY_MS = 400,          -- key order rejected by BoC (book moved before it arrived): re-price once, still passive,
+                               -- if the key was pressed less than N ms ago (0 = off)
+  TX_BY_CLASS = {},            -- per-class field name overrides, e.g. { TQBR = { COND = "Тип по остатку" } }
   TX = {                       -- universal-format field names: as in the order entry dialog of YOUR QUIK
     ACTION = "Ввод заявки",
     ACCOUNT = "Торговый счет",

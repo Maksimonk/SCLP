@@ -397,9 +397,8 @@ return function(X)
     local R = {}
     if inst then
       local bk = inst.bk
-      local mode = X.O.mode(inst)
-      vals.mode = (mode == "boc") and ("Только пассивная (BoC биржи)" .. (X.O.passive_checked and ", признак подтверждён" or ""))
-        or "Лимитная + проверка стакана (BoC не подтверждён)"
+      vals.mode = "Только пассивная (BoC биржи)" .. (X.O.passive_checked[inst.class] and ", признак подтверждён" or
+        ", признак проверится на первой заявке") .. "; PANIC - IOC"
       vals.book = (bk.bb and bk.ba) and string.format("%s x%s | %s x%s | спред %s", inst:px_str(bk.bb), U.fmt(bk.bq, 0),
         inst:px_str(bk.ba), U.fmt(bk.aq, 0), bk.valid and tostring(bk.spread) or "-") or "нет данных"
       vals.status = string.format("%s%s, лимиты %s..%s", tostring(inst.status_text or "?"),

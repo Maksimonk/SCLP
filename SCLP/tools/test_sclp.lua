@@ -196,15 +196,18 @@ SIM.book("BMX6", { { 7000, 10 }, { 6999, 12 }, { 6998, 15 } }, { { 7003, 10 }, {
 SIM.run(0.5)
 
 ------------------------------------------------------------------
-T_("TEST 6: BoC reject when the book moves before the order arrives")
+T_("TEST 6: BoC reject when the book moves before the order arrives -> one passive re-price")
 reset_book()
 key(RIGHT); key(RIGHT)                            -- offset +2 -> buy 70.02
 key(UP)
 SIM.set("BMX6", "S", 7002, 3)                     -- ask drops to 70.02 within the 100 ms latency
 SIM.run(0.3)
 check(SCLP.O.st.rej_boc == 1, "exchange rejected the would-be taker (BoC)")
-check(mx().pos == 0, "no fill")
-check((SCLP.last_msg or ""):find("тейкер", 1, true) ~= nil, "user notified")
+check(mx().pos == 0, "no taker fill")
+b = live("B")
+check(#b == 1 and b[1].px == 7001, "re-priced once on the new book: buy 70.01 = ask - 1, still Book-or-Cancel")
+check(last_sent()[cp("Условие исполнения")] == cp("Только пассивная"), "retry is BoC too")
+key(67); SIM.run(0.3)
 SIM.set("BMX6", "S", 7002, 0)
 key(LEFT); key(LEFT)
 SIM.run(0.3)
@@ -403,18 +406,18 @@ check(mx().pos == pos0 + 1 and #mx().lots == lots0, "open lots carried over")
 check(mx().n == 0 and mx().realized == 0, "intraday statistics reset")
 
 ------------------------------------------------------------------
-T_("TEST 16: 'limit' mode (no BoC): fixed format with tag, taker fill is detected")
+T_("TEST 16: every regular order is Book-or-Cancel; only PANIC uses IOC; per-class field overrides")
 SCLP.running = false
-start(base_cfg({ PASSIVE_MODE = { SPBFUT = "limit" } }))
+start(base_cfg({ TX_BY_CLASS = { SPBFUT = { COND = "Условие исполнения" } } }))
 reset_book()
-key(RIGHT); key(RIGHT)
-key(UP)
-local lt = last_sent()
-check(lt.ACTION == "NEW_ORDER" and lt.TYPE == "L" and lt.EXECUTION_CONDITION == nil and lt.COMMENT == "SCLP",
-  "plain limit with COMMENT tag")
-SIM.set("BMX6", "S", 7001, 2)                     -- market comes through our price before arrival
-SIM.run(0.3)
-check(SCLP.O.st.taker_suspect == 1, "taker fill detected and alerted")
+local fixed = 0
+for _, tx in ipairs(SIM.sent) do
+  if tx.ACTION == "NEW_ORDER" and tx.EXECUTION_CONDITION ~= "KILL_BALANCE" then fixed = fixed + 1 end
+end
+check(fixed == 0, "no plain limit order was ever sent in the whole run")
+key(UP); SIM.run(0.2)
+check(last_sent()[cp("Условие исполнения")] == cp("Только пассивная"), "BoC with per-class TX override")
+key(67); SIM.run(0.3)
 
 ------------------------------------------------------------------
 T_("TEST 17: switching instrument with an open position needs confirmation")

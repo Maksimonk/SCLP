@@ -130,7 +130,6 @@ function X.activate(inst, text, t, at_start)
   S.mark_settings()
   U.log(string.format("=== instrument %s: tick %s, lot %s, point %s RUB, mode %s ===", inst.key, tostring(inst.tick),
     tostring(inst.lot), tostring(inst.point), O.mode(inst)))
-  if O.mode(inst) == "boc" and not X.cfg.TX then U.alert("TX fields missing") end
 end
 
 local function run_recovery(t)
