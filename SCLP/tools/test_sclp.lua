@@ -21,12 +21,17 @@ function AllocTable() UI.next = UI.next + 1; UI.tables[UI.next] = { cells = {}, 
 function AddColumn() end
 function CreateWindow() end
 function SetWindowCaption(id, s) UI.tables[id].caption = s end
-function SetWindowPos() end
+function SetWindowPos(id, x, y, w, h) UI.tables[id].pos = { x, y, w, h } end
+function GetWindowRect(id)                        -- top, left, bottom, right
+  local p = UI.tables[id] and (UI.tables[id].moved or UI.tables[id].pos)
+  if not p then return nil end
+  return p[2], p[1], p[2] + p[4], p[1] + p[3]
+end
 function InsertRow(id) local tb = UI.tables[id]; tb.rows = tb.rows + 1; return tb.rows end
 function SetCell(id, r, c, s) UI.tables[id].cells[r .. ":" .. c] = s end
 function SetColor() end
 function Highlight() end
-function IsWindowClosed() return false end
+function IsWindowClosed(id) return UI.tables[id] == nil or UI.tables[id].closed == true end
 function DestroyTable(id) UI.tables[id] = nil end
 function SetTableNotificationCallback(id, cb) UI.tables[id].cb = cb end
 
@@ -54,7 +59,7 @@ local function base_cfg(over)
 end
 
 local function wipe_state()
-  for _, f in ipairs({ "sclp_settings_TEST01.lua", "sclp_state_TEST01_SPBFUT_BMX6.lua" }) do
+  for _, f in ipairs({ "sclp_settings_TEST01.lua", "sclp_state_TEST01_SPBFUT_BMX6.lua", "sclp_ui.lua" }) do
     for _, sfx in ipairs({ "", ".tmp", ".bak" }) do os.remove(OUT .. "/" .. f .. sfx) end
   end
 end
@@ -523,6 +528,23 @@ local want = string.format("%.4f", ((c0 + 6500 * 2 + 6501) / (b0 + 3)) * 0.01)
 check(avgw and from(avgw.cells["1:2"] or "") == tostring(b0 + 3), "window: bought lots " .. tostring(avgw and from(avgw.cells["1:2"] or "")))
 check(avgw and from(avgw.cells["2:2"] or "") == want, "window: average buy price " .. want .. ", got " .. tostring(avgw and from(avgw.cells["2:2"] or "")))
 key(67); SIM.run(0.3)
+
+------------------------------------------------------------------
+T_("TEST 21: the average-price window comes back after closing; windows remember their position")
+local avg_id = 2
+UI.tables[avg_id].closed = true
+SIM.run(1.5)
+local reopened
+for id, tb in pairs(UI.tables) do
+  if id ~= avg_id and not tb.closed and from(tb.caption or ""):find("средние цены", 1, true) then reopened = tb end
+end
+check(reopened ~= nil, "average-price window reopened")
+UI.tables[1].moved = { 300, 200, 900, 400 }      -- the user moves the main window
+SIM.run(6)                                        -- saved within 5 s
+SCLP.running = false
+start()
+local mp = UI.tables[1].pos
+check(mp and mp[1] == 300 and mp[2] == 200 and mp[3] == 900 and mp[4] == 400, "main window restored at the saved place")
 
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))

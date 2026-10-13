@@ -63,6 +63,48 @@ return function(X)
   local function api() return AllocTable and AddColumn and CreateWindow and SetCell and QTABLE_STRING_TYPE end
   local function enc(x) return U.to_cp1251(tostring(x == nil and "" or x)) end
 
+  ------------------------------------------------------------------
+  -- WINDOW POSITIONS: remembered in sclp_ui.lua (every 5 s and on stop) and restored when a window is created
+  ------------------------------------------------------------------
+  local POS, pos_loaded = {}, false
+  local wins = {}                                   -- name -> table id of the open windows
+  local function pos_path() return U.path("sclp_ui.lua") end
+  local function load_pos()
+    if pos_loaded then return end
+    pos_loaded = true
+    local txt = U.read_file(pos_path())
+    local fn = txt and load(txt, "=sclp_ui", "t", {})
+    local ok, v = false, nil
+    if fn then ok, v = pcall(fn) end
+    if ok and type(v) == "table" then POS = v end
+  end
+  local function rect(id)
+    if not GetWindowRect or not id then return nil end
+    local ok, top, left, bottom, right = pcall(GetWindowRect, id)
+    top, left, bottom, right = tonumber(top), tonumber(left), tonumber(bottom), tonumber(right)
+    if not ok or not (top and left and bottom and right) then return nil end
+    local w, h = right - left, bottom - top
+    if w < 50 or h < 30 or w > 10000 or h > 10000 then return nil end
+    return { left, top, w, h }
+  end
+  -- create-time placement: the remembered rectangle, else the default one
+  local function place(id, name, x, y, w, h)
+    load_pos()
+    wins[name] = id
+    local r = POS[name]
+    if type(r) == "table" and tonumber(r[1]) and tonumber(r[4]) then x, y, w, h = r[1], r[2], r[3], r[4] end
+    if SetWindowPos then pcall(SetWindowPos, id, x, y, w, h) end
+  end
+  function W.save_pos()
+    local changed = false
+    for name, id in pairs(wins) do
+      local r = rect(id)
+      local o = POS[name]
+      if r and not (o and o[1] == r[1] and o[2] == r[2] and o[3] == r[3] and o[4] == r[4]) then POS[name] = r; changed = true end
+    end
+    if changed then U.write_file_atomic(pos_path(), "return " .. U.serialize(POS) .. "\n") end
+  end
+
   local AVG = { id = nil, cache = {} }
 
   -- "average prices" window: what was bought / sold today and at what average price (real trade prices)
@@ -77,7 +119,7 @@ return function(X)
       CreateWindow(id)
       SetWindowCaption(id, enc("SCLP: средние цены"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
-      if SetWindowPos then pcall(SetWindowPos, id, p[1] + p[3] + 10, p[2], 380, 40 + 18 * (#AVG_ROWS + 1)) end
+      place(id, "avg", p[1] + p[3] + 10, p[2], 380, 40 + 18 * (#AVG_ROWS + 1))
       AVG.rows, AVG.cache = {}, {}
       for i, l in ipairs(AVG_ROWS) do
         AVG.rows[i] = InsertRow(id, -1)
@@ -143,7 +185,7 @@ return function(X)
       CreateWindow(id)
       SetWindowCaption(id, enc("SCLP"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
-      if SetWindowPos then pcall(SetWindowPos, id, p[1], p[2], p[3], p[4]) end
+      place(id, "main", p[1], p[2], p[3], p[4])
       T.id, T.rows, T.cache = id, {}, {}
       for i = 1, NROWS do T.rows[i] = InsertRow(id, -1) end
       for i, r in ipairs(LEFT) do set(i, 1, r.label) end
@@ -155,6 +197,7 @@ return function(X)
   end
 
   function W.close()
+    pcall(W.save_pos)
     if T.id and DestroyTable then pcall(DestroyTable, T.id) end
     if REP.id and DestroyTable then pcall(DestroyTable, REP.id) end
     if AVG.id and DestroyTable then pcall(DestroyTable, AVG.id) end
@@ -178,7 +221,7 @@ return function(X)
       CreateWindow(id)
       SetWindowCaption(id, enc(title or "SCLP: восстановление после запуска"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
-      if SetWindowPos then pcall(SetWindowPos, id, p[1], p[2] + p[4] + 10, p[3], 40 + 18 * math.min(#lines + 1, 25)) end
+      place(id, "report", p[1], p[2] + p[4] + 10, p[3], 40 + 18 * math.min(#lines + 1, 25))
       for _, l in ipairs(lines) do
         local r = InsertRow(id, -1)
         SetCell(id, r, 1, enc(l))
@@ -350,8 +393,8 @@ return function(X)
   function W.on_event(e, t)
     local msg = e.msg
     if msg == QTABLE_CLOSE then
-      if e.tbl == T.id then T.id = nil; X.ui_closed_t = t end
-      if e.tbl == REP.id then REP.id = nil end
+      if e.tbl == T.id then wins.main = nil; T.id = nil; X.ui_closed_t = t end
+      if e.tbl == REP.id then wins.report = nil; REP.id = nil end
       return
     end
     if e.tbl ~= T.id then return end
@@ -508,14 +551,19 @@ return function(X)
     end
     if IsWindowClosed and t - t_ui >= 0.2 then
       local ok, closed = pcall(IsWindowClosed, T.id)
-      if ok and closed then T.id = nil; X.ui_closed_t = t; return end
+      if ok and closed then wins.main = nil; T.id = nil; X.ui_closed_t = t; return end
     end
     if t - t_ui < (X.cfg.UI_REFRESH_SEC or 0.2) then return end
     t_ui = t
+    if t - (W.t_pos or 0) >= 5 then W.t_pos = t; pcall(W.save_pos) end
     local ok, err = pcall(update, t)
     if ok and AVG.id and IsWindowClosed then
       local ok2, closed = pcall(IsWindowClosed, AVG.id)
-      if ok2 and closed then AVG.id = nil end
+      if ok2 and closed then pcall(W.save_pos); wins.avg = nil; AVG.id = nil; AVG.closed_t = t end
+    end
+    if not AVG.id and AVG.closed_t and t - AVG.closed_t >= 1 then  -- closed by the user: comes back like the main one
+      AVG.closed_t = nil
+      avg_open()
     end
     if ok then ok, err = pcall(avg_update) end
     if not ok then U.log_every("ui_err", 60, "UI update error: " .. tostring(err)) end

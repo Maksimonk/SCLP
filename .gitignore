@@ -6,3 +6,4 @@ SCLP/sclp_settings_*.lua*
 SCLP/probe_passive_*.txt
 SCLP/tools/test_out/
 .DS_Store
+SCLP/sclp_ui.lua*
