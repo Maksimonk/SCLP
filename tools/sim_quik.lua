@@ -108,11 +108,13 @@ end
 
 function getNumberOf(name)
   if name == "orders" then return #SIM.rows end
+  if name == "trades" then return #(SIM.trade_rows or {}) end
   if name == "futures_client_holding" then return 1 end
   return 0
 end
 function getItem(name, i)
   if name == "orders" then return SIM.rows[i + 1] end
+  if name == "trades" then return (SIM.trade_rows or {})[i + 1] end
   if name == "futures_client_holding" then
     local sec = next(SIM.pos)
     return sec and { sec_code = sec, trdaccid = SC.cfg.ACCOUNT, totalnet = SIM.pos[sec] } or nil
@@ -143,6 +145,9 @@ local function fill_robot(o, q, px)
                price = string.format("%.2f", px * SIM.info[o.sec].tick), flags = (o.side == "S") and 4 or 0, sec_code = o.sec }
   SIM.fills = SIM.fills or {}
   SIM.fills[#SIM.fills + 1] = { sec = o.sec, side = o.side, q = q, px = px, t = SIM.t, tid = o.tid }
+  tr.class_code = "SPBFUT"
+  SIM.trade_rows = SIM.trade_rows or {}
+  SIM.trade_rows[#SIM.trade_rows + 1] = tr
   emit_order(o)
   if OnTrade then OnTrade(tr) end
 end
@@ -172,6 +177,16 @@ function sendTransaction(t)
       end
     end)
     return ""
+  end
+  if t.ACTION == "NEW_ORDER" and t.EXECUTION_CONDITION ~= "KILL_BALANCE" then   -- обычная лимитная (в очередь)
+    SIM.plain_orders = (SIM.plain_orders or 0) + 1
+    local tr = {}
+    tr[cp("Торговый счет")] = t.ACCOUNT; tr[cp("К/П")] = cp(t.OPERATION == "B" and "Покупка" or "Продажа")
+    tr[cp("Тип")] = cp("Лимитированная"); tr[cp("Инструмент")] = t.SECCODE; tr[cp("Цена")] = t.PRICE
+    tr[cp("Количество")] = t.QUANTITY; tr.TRANS_ID = t.TRANS_ID; tr.CLASSCODE = t.CLASSCODE; tr.ACTION = cp("Ввод заявки")
+    local res = sendTransaction(tr)
+    table.remove(SIM.sent)                  -- keep the original fixed-format transaction in SIM.sent
+    return res
   end
   if t.ACTION == "NEW_ORDER" then           -- фиксированный формат (жёсткий стоп): лимитная "снять остаток"
     local tid = tonumber(t.TRANS_ID)
