@@ -71,11 +71,9 @@ return function(X)
     if X.panic and X.panic.stage ~= "done" then return false, "идёт PANIC" end
     if R.day_stop then return false, "дневной лимит убытка" end
     if X.paused then return false, "пауза (H - продолжить)" end
-    if qty < 1 or qty > (X.cfg.MAX_ORDER_QTY or 100) then return false, "объём вне 1.." .. (X.cfg.MAX_ORDER_QTY or 100) end
+    if qty < 1 then return false, "объём должен быть не меньше 1" end
     local mb = R.market_block(inst, t)
     if mb then return false, mb end
-    local per_min = X.O.orders_last_min(t)
-    if per_min >= (X.cfg.MAX_ORDERS_PER_MIN or 60) then return false, "лимит заявок в минуту (" .. per_min .. ")" end
     -- no position limit: the trader controls the position (the daily loss limit and PANIC remain)
     return true
   end
@@ -130,11 +128,6 @@ return function(X)
     if st.sent >= 50 and otr > (X.cfg.OTR_WARN or 20) and t - t_warn_otr > 300 then
       t_warn_otr = t
       U.alert(string.format("order-to-trade ratio %.1f (transactions per fill) is high - fewer cancels", otr), 2)
-    end
-    local pm = X.O.orders_last_min(t)
-    if pm >= 0.8 * (X.cfg.MAX_ORDERS_PER_MIN or 60) and t - t_warn_rate > 60 then
-      t_warn_rate = t
-      U.alert(string.format("%d orders in the last minute (limit %d)", pm, X.cfg.MAX_ORDERS_PER_MIN or 60), 2)
     end
   end
 

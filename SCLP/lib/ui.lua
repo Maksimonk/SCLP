@@ -50,7 +50,7 @@ return function(X)
     "Реализ. P&L гросс / нетто", "Нереализ. P&L гросс / нетто", "ИТОГО нетто / за сессию", "P&L в час / на сделку",
     "Комиссии, руб", "Сделок (закрытий) / win rate", "Ср. выигрыш / ср. проигрыш", "Profit factor",
     "Макс. просадка, руб", "Макс. позиция / экспозиция", "Заявок: отпр/исп/снято/откл", "Fill ratio / OTR",
-    "Заявок за минуту / лимит", "Отказы BoC / ошибочные tx", "Клавиша -> отправка, мс", "Отправка -> ответ, мс",
+    "Заявок за минуту", "Отказы BoC / ошибочные tx", "Клавиша -> отправка, мс", "Отправка -> ответ, мс",
     "Спред / сигма, тиков", "Маркаут 1/5/30 с, тиков", "Тейкерских исполнений",
   }
   local ROW = {}
@@ -62,6 +62,48 @@ return function(X)
 
   local function api() return AllocTable and AddColumn and CreateWindow and SetCell and QTABLE_STRING_TYPE end
   local function enc(x) return U.to_cp1251(tostring(x == nil and "" or x)) end
+
+  local AVG = { id = nil, cache = {} }
+
+  -- "average prices" window: what was bought / sold today and at what average price (real trade prices)
+  local AVG_ROWS = { "Куплено, лотов", "Средняя цена покупок", "Продано, лотов", "Средняя цена продаж",
+                     "Позиция (открытые ноги)", "Средняя цена позиции (FIFO)", "Безубыток закрытия" }
+  local function avg_open()
+    if X.cfg.SHOW_WINDOW == false or not api() or AVG.id then return end
+    pcall(function()
+      local id = AllocTable()
+      AddColumn(id, 1, enc("Показатель"), true, QTABLE_STRING_TYPE, 30)
+      AddColumn(id, 2, enc("Значение"), true, QTABLE_STRING_TYPE, 24)
+      CreateWindow(id)
+      SetWindowCaption(id, enc("SCLP: средние цены"))
+      local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
+      if SetWindowPos then pcall(SetWindowPos, id, p[1] + p[3] + 10, p[2], 380, 40 + 18 * (#AVG_ROWS + 1)) end
+      AVG.rows, AVG.cache = {}, {}
+      for i, l in ipairs(AVG_ROWS) do
+        AVG.rows[i] = InsertRow(id, -1)
+        SetCell(id, AVG.rows[i], 1, enc(l))
+      end
+      AVG.id = id
+    end)
+  end
+  local function avg_update()
+    local inst = X.inst
+    if not AVG.id or not inst then return end
+    local m = X.M.get(inst)
+    local function px(v) return v and U.fmt(v * inst.tick, inst.scale + 2) or "-" end
+    local side = m.pos > 0 and "S" or "B"
+    local be = m.pos ~= 0 and X.M.breakeven(inst, side, math.abs(m.pos)) or nil
+    local vals = {
+      tostring(m.bought), m.bought > 0 and px((m.buy_cost or 0) / m.bought) or "-",
+      tostring(m.sold), m.sold > 0 and px((m.sell_cost or 0) / m.sold) or "-",
+      string.format("%+d", m.pos), px(m.avg),
+      be and (px(be) .. (m.pos > 0 and " (продажа не ниже)" or " (покупка не выше)")) or "-",
+    }
+    for i, v in ipairs(vals) do
+      if AVG.cache[i] ~= v then AVG.cache[i] = v; SetCell(AVG.id, AVG.rows[i], 2, enc(v)) end
+    end
+    SetWindowCaption(AVG.id, enc("SCLP: средние цены " .. inst.sec))
+  end
 
   local function set(row, col, text)
     local k = row * 8 + col
@@ -109,12 +151,14 @@ return function(X)
       if SetTableNotificationCallback then SetTableNotificationCallback(id, callback) end
     end)
     if not ok then U.log("UI open error: " .. tostring(err)) end
+    avg_open()
   end
 
   function W.close()
     if T.id and DestroyTable then pcall(DestroyTable, T.id) end
     if REP.id and DestroyTable then pcall(DestroyTable, REP.id) end
-    T.id, REP.id = nil, nil
+    if AVG.id and DestroyTable then pcall(DestroyTable, AVG.id) end
+    T.id, REP.id, AVG.id = nil, nil, nil
   end
 
   -- recovery report window (one text column); append = add lines to the open report
@@ -218,7 +262,7 @@ return function(X)
       if v < 0 or v > (cfg.OFFSET_MAX or 50) then X.say("Отступ: 0.." .. (cfg.OFFSET_MAX or 50) .. " (0 - лучшая цена, больше - внутрь спреда)", "err"); return end
       st.offset = v
     elseif e.id == "qty" then
-      if v < 1 or v > (cfg.MAX_ORDER_QTY or 100) then X.say("Объём 1.." .. (cfg.MAX_ORDER_QTY or 100), "err"); return end
+      if v < 1 then X.say("Объём должен быть не меньше 1", "err"); return end
       st.qty = v
     elseif e.id == "tp" then
       if v < 0 or v > 1000 then X.say("Тейк 0..1000 тиков (0 - выкл.)", "err"); return end
@@ -248,7 +292,7 @@ return function(X)
   local function bump(field, d)
     local st, cfg = X.st, X.cfg
     if field == "offset" then st.offset = U.clamp((st.offset or 0) + d, 0, cfg.OFFSET_MAX or 50)
-    else st.qty = U.clamp((st.qty or 1) + d, 1, cfg.MAX_ORDER_QTY or 100) end
+    else st.qty = math.max(1, (st.qty or 1) + d) end
     X.S.mark_settings()
     X.say(field == "offset" and ("Отступ " .. st.offset) or ("Объём " .. st.qty))
   end
@@ -422,7 +466,7 @@ return function(X)
         string.format("%d / %s руб", m.max_abs_pos, U.fmt(v.exposure, 0)),
         string.format("%d / %d / %d / %d", st_.sent, st_.filled, st_.cancelled, st_.rejected),
         string.format("%s / %.1f", st_.sent > 0 and string.format("%.0f%%", 100 * st_.filled / st_.sent) or "-", X.M.otr()),
-        string.format("%d / %d", X.O.orders_last_min(t), X.cfg.MAX_ORDERS_PER_MIN or 60),
+        tostring(X.O.orders_last_min(t)),
         string.format("%d / %d", st_.rej_boc, st_.rej_other + st_.rej_cross + st_.kill_err + st_.local_err),
         lat_text("key_send"),
         lat_text("send_reply"),
@@ -469,6 +513,11 @@ return function(X)
     if t - t_ui < (X.cfg.UI_REFRESH_SEC or 0.2) then return end
     t_ui = t
     local ok, err = pcall(update, t)
+    if ok and AVG.id and IsWindowClosed then
+      local ok2, closed = pcall(IsWindowClosed, AVG.id)
+      if ok2 and closed then AVG.id = nil end
+    end
+    if ok then ok, err = pcall(avg_update) end
     if not ok then U.log_every("ui_err", 60, "UI update error: " .. tostring(err)) end
   end
 

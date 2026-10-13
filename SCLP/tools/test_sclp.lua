@@ -503,6 +503,27 @@ check(mx().pos == p0 + 1, "trade taken from the trades table as soon as the orde
 local lot = mx().lots[#mx().lots]
 check(lot and lot.px == 6500, "booked at the real trade price 65.00")
 
+------------------------------------------------------------------
+T_("TEST 20: average-price window, no order-size / per-minute limits")
+local m20 = mx()
+local b0, c0 = m20.bought, m20.buy_cost or 0
+SCLP.st.qty = 50                                  -- bigger than the old 20-lot cap
+SIM.book("BRX6", { { 6500, 1 } }, { { 6503, 100 } })
+SIM.run(0.3)
+key(UP); SIM.run(0.3)                             -- 50 @ 65.00
+check(live("B")[1] == nil and #SCLP.O.working(inst(), "B") == 1 and SCLP.O.working(inst(), "B")[1].qty == 50, "50-lot order accepted")
+SIM.trade("BRX6", -1, 6500, 3); SIM.run(0.3)       -- 1 market ahead, 2 of ours filled
+SCLP.st.qty = 1
+SIM.book("BRX6", { { 6501, 1 } }, { { 6503, 100 } })
+SIM.run(0.3)
+key(UP); SIM.run(0.3)                             -- 1 @ 65.01
+SIM.trade("BRX6", -1, 6501, 2); SIM.run(0.5)
+local avgw = UI.tables[2]
+local want = string.format("%.4f", ((c0 + 6500 * 2 + 6501) / (b0 + 3)) * 0.01)
+check(avgw and from(avgw.cells["1:2"] or "") == tostring(b0 + 3), "window: bought lots " .. tostring(avgw and from(avgw.cells["1:2"] or "")))
+check(avgw and from(avgw.cells["2:2"] or "") == want, "window: average buy price " .. want .. ", got " .. tostring(avgw and from(avgw.cells["2:2"] or "")))
+key(67); SIM.run(0.3)
+
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

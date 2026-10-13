@@ -20,9 +20,7 @@ return {
   ------------------------------------------------------------------
   -- Hard limits (fat-finger protection)
   ------------------------------------------------------------------
-  MAX_ORDER_QTY = 20,
   OFFSET_MAX = 50,
-  MAX_ORDERS_PER_MIN = 60,     -- new orders in a rolling minute (take-profits included)
   MAX_TX_PER_SEC = 20,         -- transactions per second (MOEX login base: 30)
   KEY_COOLDOWN_MS = 250,       -- one order per side per N ms (keyboard auto-repeat)
   OTR_WARN = 20,               -- warn above N transactions (orders + cancels) per fill

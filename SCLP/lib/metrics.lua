@@ -70,7 +70,10 @@ return function(X)
     local taker = (o.mode == "taker") or o.taker_suspect
     local fee = opt.fee or M.fee(inst, q, px, taker)
     m.fees = m.fees + fee
-    if sgn > 0 then m.bought = m.bought + q else m.sold = m.sold + q end
+    if o.mode ~= "external" then                          -- real trades only (an adopted position is not a trade)
+      if sgn > 0 then m.bought, m.buy_cost = m.bought + q, (m.buy_cost or 0) + px * q
+      else m.sold, m.sell_cost = m.sold + q, (m.sell_cost or 0) + px * q end
+    end
     local closed_net
     local left = q
     while left > 0 and m.lots[1] and m.lots[1].sgn ~= sgn do
@@ -132,6 +135,7 @@ return function(X)
     for _, m in pairs(M.by_key) do
       m.realized, m.n, m.wins, m.losses, m.sum_win, m.sum_loss = 0, 0, 0, 0, 0, 0
       m.fees = m.open_fee or 0
+      m.buy_cost, m.sell_cost = 0, 0
       m.peak, m.max_dd, m.bought, m.sold, m.t0, m.mk, m.mk_n, m.last_eq = 0, 0, 0, 0, t, { 0, 0, 0 }, 0, 0
       m.max_abs_pos = abs(m.pos)
     end
@@ -275,7 +279,7 @@ return function(X)
     local m = M.get(inst)
     return { lots = m.lots, realized = m.realized, fees = m.fees, n = m.n, wins = m.wins, losses = m.losses,
              sum_win = m.sum_win, sum_loss = m.sum_loss, max_abs_pos = m.max_abs_pos, peak = m.peak, max_dd = m.max_dd,
-             bought = m.bought, sold = m.sold, t0 = m.t0, mk = m.mk, mk_n = m.mk_n, last_eq = m.last_eq }
+             bought = m.bought, sold = m.sold, buy_cost = m.buy_cost, sell_cost = m.sell_cost, t0 = m.t0, mk = m.mk, mk_n = m.mk_n, last_eq = m.last_eq }
   end
   -- restore one instrument. same_day = false: only the open lots carry over, intraday statistics restart
   function M.import_one(inst, s, same_day, t)
@@ -288,7 +292,7 @@ return function(X)
     end
     if s and same_day then
       for _, f in ipairs({ "realized", "fees", "n", "wins", "losses", "sum_win", "sum_loss", "max_abs_pos", "peak",
-                           "max_dd", "bought", "sold", "t0", "mk", "mk_n", "last_eq" }) do
+                           "max_dd", "bought", "sold", "buy_cost", "sell_cost", "t0", "mk", "mk_n", "last_eq" }) do
         if s[f] ~= nil then m[f] = s[f] end
       end
     end
