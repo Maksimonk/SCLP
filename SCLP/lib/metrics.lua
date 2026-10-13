@@ -199,7 +199,7 @@ return function(X)
       "send_to_active_ms,life_ms,avg_fill_price,reject",
       table.concat({ U.date("%Y-%m-%d", o.t_send0), U.stamp(o.t_send0), inst.sec, o.tid, o.side, inst:px_str(o.px), o.qty,
         o.filled, o.src, o.mode, o.state, ms(o.t_key, o.t_send), ms(o.t_send, o.t_reply), ms(o.t_send, o.t_active),
-        ms(o.t_send, o.t_done), (o.filled > 0 and o.cost) and (U.fmt(o.cost / o.filled * inst.tick, inst.scale + 2) .. (o.estimated and "?" or "")) or "",
+        ms(o.t_send, o.t_done), (o.filled > 0 and o.cost) and U.fmt(o.cost / o.filled * inst.tick, inst.scale + 2) or "",
         ((o.reject_msg or ""):gsub("[,\r\n]", " ")) }, ","))
   end
 

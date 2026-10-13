@@ -501,9 +501,7 @@ local saved_ot = OnTrade
 OnTrade = nil                                      -- QUIK "loses" the trade callback
 SIM.trade("BRX6", -1, 6500, 11); SIM.run(0.2)
 OnTrade = saved_ot
-check(mx().pos == p0, "no OnTrade yet: position not changed")
-SIM.run(6)
-check(mx().pos == p0 + 1, "trade taken from the trades table after 5 s")
+check(mx().pos == p0 + 1, "trade taken from the trades table as soon as the order row shows the execution")
 local lot = mx().lots[#mx().lots]
 check(lot and lot.px == 6500, "booked at the real trade price 65.00")
 

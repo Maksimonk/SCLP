@@ -140,7 +140,8 @@ return function(X)
     O.live[o.id] = nil
     if how == "CANCELLED" then O.st.cancelled = O.st.cancelled + 1 end
     if how == "FILLED" then O.st.filled = O.st.filled + 1 end
-    if settled(o) then emit("done", o, t) else O.await[o.id] = { o = o, t = t } end
+    if not settled(o) then O.scan_trades(o, t) end      -- the trades table is the source of truth for prices
+    if settled(o) then emit("done", o, t) else O.await[o.id] = { o = o, t = t, t_scan = t } end
   end
 
   ------------------------------------------------------------------
@@ -450,21 +451,17 @@ return function(X)
     for id, w in pairs(O.await) do
       local o = w.o
       if settled(o) then O.await[id] = nil; emit("done", o, t)
-      elseif t - w.t > 5 and not w.scanned then
-        -- trades were not delivered by OnTrade: take them (with their real prices) from the trades table
-        w.scanned = true
+      elseif t - w.t_scan >= 1 then
+        -- executed by the orders table, trades not booked yet: read them (real prices) from the trades table.
+        -- Never booked at an assumed price - the position waits for the real trades.
+        w.t_scan = t
         O.scan_trades(o, t)
-        if settled(o) then O.await[id] = nil; emit("done", o, t) end
-      elseif t - w.t > 60 then
-        O.await[id] = nil
-        local rest = o.exec_by_table - o.filled
-        -- last resort, flagged: a maker fills at its own price; a taker at the best price seen at send time
-        local px = (o.mode == "taker" and o.ref_px) or o.px
-        o.estimated = true
-        U.alert(string.format("[%s] tid=%d: %d lot(s) executed but no trades in 60 s - booked at ESTIMATED price %s, check the trades table",
-          o.inst.sec, o.tid, rest, o.inst:px_str(px)), 3)
-        O.fill(o, rest, px, t)
-        emit("done", o, t)
+        if settled(o) then O.await[id] = nil; emit("done", o, t)
+        elseif t - w.t > 30 and not w.warned then
+          w.warned = true
+          U.alert(string.format("[%s] tid=%d: %d lot(s) executed by the orders table but not in the trades table yet - waiting",
+            o.inst.sec, o.tid, o.exec_by_table - o.filled), 2)
+        end
       end
     end
     for _, o in pairs(O.live) do
