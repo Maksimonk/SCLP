@@ -165,11 +165,17 @@ return function(X)
     q = min(q, abs(pos) - closing)
     if q <= 0 then return end
     if not X.R.can_reduce(inst, t) then return end
-    local tp = X.st.tp
-    -- lot price may be off the tick grid (adopted position at the broker's average): round away from the market
-    local want = (side == "S") and math.ceil(px + tp - 1e-9) or math.floor(px - tp + 1e-9)
+    -- counter order after a fill: N ticks from the CURRENT MARKET on its own side (like the arrow keys:
+    -- sell = best ask + N, buy = best bid - N), not from the fill price - a fill-based price could be far from the
+    -- market (never filled) or on the other side of it (rejected by BoC)
+    X.B.read(inst, t)
+    local bk = inst.bk
+    local best = (side == "S") and (bk.shown_ba or bk.ba) or (bk.shown_bb or bk.bb)
+    if not best then return end
+    local n = X.st.tp
+    local want = (side == "S") and (best + n) or (best - n)
     local cap = X.B.passive_cap(inst, side)
-    if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end   -- market ran past TP
+    if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end
     if not X.I.in_limits(inst, want) then return end
     local tpo = X.O.place(inst, side, want, q, { src = "tp", parent = lot.tn, px0 = want }, t)
     if tpo then

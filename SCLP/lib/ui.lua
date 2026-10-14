@@ -346,7 +346,7 @@ return function(X)
     elseif id == "skew" then st.skew = not st.skew; X.say("Перекос от позиции " .. (st.skew and "ВКЛ" or "ВЫКЛ"))
     elseif id == "tp" then
       if (st.tp or 0) > 0 then st.tp_last = st.tp; st.tp = 0 else st.tp = st.tp_last or X.cfg.TP_TICKS_DEFAULT or 2 end
-      X.say("Встречная после исполнения " .. ((st.tp > 0) and ("ВКЛ, " .. st.tp .. " тиков от цены исполнения") or "ВЫКЛ"))
+      X.say("Встречная после исполнения " .. ((st.tp > 0) and ("ВКЛ, рынок ± " .. st.tp .. " тиков") or "ВЫКЛ"))
     end
     X.S.mark_settings()
   end
@@ -466,7 +466,7 @@ return function(X)
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
     vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
-    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: " .. st.tp .. " тиков от цены исполнения") or "ВЫКЛ")
+    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: продажа = аск+" .. st.tp .. " / покупка = бид-" .. st.tp) or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрытие по F, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"
