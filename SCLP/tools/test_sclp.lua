@@ -59,7 +59,7 @@ local function base_cfg(over)
 end
 
 local function wipe_state()
-  for _, f in ipairs({ "sclp_settings_TEST01.lua", "sclp_state_TEST01_SPBFUT_BMX6.lua", "sclp_ui.lua" }) do
+  for _, f in ipairs({ "sclp_settings_TEST01.lua", "sclp_state_TEST01_SPBFUT_BMX6.lua", "sclp_state_TEST01_SPBFUT_MXZ6.lua", "sclp_ui.lua" }) do
     for _, sfx in ipairs({ "", ".tmp", ".bak" }) do os.remove(OUT .. "/" .. f .. sfx) end
   end
 end
@@ -625,25 +625,30 @@ SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 check(#mlive("B") >= 1, "counter restored for the remaining lot")
 
 ------------------------------------------------------------------
-T_("TEST 23: live 13:22 - both sides quoted with T on: the resting arrow-key order becomes the counter (no overshoot)")
-key(67); SIM.run(0.3)
-local p23 = mx().pos
-SCLP.st.tp, SCLP.st.offset = 1, 0
-if p23 ~= 0 then                                       -- flatten whatever is left from TEST 22
-  mx_book(9830, 9831)
-  key(p23 > 0 and DOWN or UP); SIM.run(0.3)
-  SIM.trade("MXZ6", p23 > 0 and 1 or -1, p23 > 0 and 9831 or 9830, 50); SIM.run(0.5)
-  key(67); SIM.run(0.3)
-end
+T_("TEST 23: live 13:22 - both sides quoted with T on: every arrow-key fill is its own pair with its own counter")
+SCLP.running = false
+wipe_state()
+fresh_exchange()
+SIM.add_sec("MXZ6", 25, 0, 25, 20261218)
+mx_book(9854, 9855)
+start(base_cfg({ DEFAULT_INSTRUMENT = "SPBFUT MXZ6", TP_TICKS = 1, FEES = { SPBFUT = { BROKER_RUB = 0 } } }))
 check(mx().pos == 0, "flat before the scenario")
 mx_book(9854, 9855)                                    -- 246350 / 246375
 key(UP); key(DOWN); key(UP); key(DOWN); SIM.run(0.3)   -- buy, sell, buy, sell in a fraction of a second
 check(#mlive("B") == 2 and #mlive("S") == 2, "2 buys @ 246350, 2 sells @ 246375")
-SIM.trade("MXZ6", 1, 9855, 30); SIM.run(0.3)           -- both sells fill
-check(#mlive("B") == 2, "no extra counter buys: the 2 resting buys were adopted as counters, got " .. #mlive("B"))
-SIM.trade("MXZ6", -1, 9854, 30); SIM.run(0.3)          -- both buys fill
-check(mx().pos == 0, "flat - no overshoot (live: ended long +1), got " .. mx().pos)
-check(#mlive("B") + #mlive("S") == 0, "nothing left resting")
+SIM.trade("MXZ6", 1, 9855, 2); SIM.run(0.1)            -- buyers lift exactly our 2 sells (nothing ahead at 9855? 10 market first)
+SIM.trade("MXZ6", 1, 9855, 20); SIM.run(0.1)
+mx_book(9854, 9856); SIM.run(0.3)                      -- the book stays two-sided
+check(mx().pos == -2, "short 2 from the two sells")
+check(#mlive("B") == 4, "2 own buys + 2 counter buys (each sell has its own counter), got " .. #mlive("B"))
+SIM.trade("MXZ6", -1, 9854, 30); SIM.run(0.1)          -- all 4 buys fill
+mx_book(9853, 9855); SIM.run(0.3)
+check(mx().pos == 2, "net +2: the two own buys are open pairs (intended)")
+local cs23 = mlive("S")
+check(#cs23 == 2 and cs23[1].px >= 9855, "each own buy got its counter sell (>= 246375), got " .. #cs23)
+SIM.trade("MXZ6", 1, 9856, 60); SIM.run(0.3)
+check(mx().pos == 0, "all four pairs closed, flat")
+check(math.abs(mx().realized - 125) < 1e-9, "4 pairs: +25 +25 +25 +50 = +125 RUB, got " .. mx().realized)
 
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))

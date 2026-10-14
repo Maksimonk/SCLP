@@ -49,15 +49,20 @@ return function(X)
     elseif net < 0 then m.losses = m.losses + 1; m.sum_loss = m.sum_loss - net end
   end
 
+  -- lots may sit on both sides at once (pinned pairs of the counter mode): the position is their signed sum,
+  -- the average price is over the lots on the side of the net position
   function M.recalc(m)
-    local pos, cost, fee = 0, 0, 0
+    local pos, fee = 0, 0
     for _, l in ipairs(m.lots) do
       pos = pos + l.sgn * l.qty
-      cost = cost + l.px * l.qty
       fee = fee + l.fee_unit * l.qty
     end
+    local cost, n = 0, 0
+    for _, l in ipairs(m.lots) do
+      if l.sgn == U.sign(pos) then cost, n = cost + l.px * l.qty, n + l.qty end
+    end
     m.pos, m.open_fee = pos, fee
-    m.avg = (pos ~= 0) and cost / abs(pos) or nil
+    m.avg = (pos ~= 0 and n > 0) and cost / n or nil
     if abs(pos) > m.max_abs_pos then m.max_abs_pos = abs(pos) end
   end
 
@@ -86,15 +91,24 @@ return function(X)
       left = left - c
       if lot.qty <= 0 then table.remove(m.lots, i) end
     end
-    -- a counter order closes its own lot first (opt.close_lot), then FIFO
+    -- a counter order closes its own lot first (opt.close_lot); an arrow-key fill in the counter mode (opt.pin)
+    -- is its own pair and nets against nothing; otherwise FIFO against free (not pinned) opposite lots
     if opt.close_lot and opt.close_lot.sgn ~= sgn then
       for i, l in ipairs(m.lots) do if l == opt.close_lot then close_against(i); break end end
     end
-    while left > 0 and m.lots[1] and m.lots[1].sgn ~= sgn do close_against(1) end
+    if not opt.pin then                                -- free lots first, then pinned pairs (a manual close / PANIC)
+      while left > 0 do
+        local idx
+        for i, l in ipairs(m.lots) do if l.sgn ~= sgn and not l.pinned then idx = i; break end end
+        if not idx then for i, l in ipairs(m.lots) do if l.sgn ~= sgn then idx = i; break end end end
+        if not idx then break end
+        close_against(idx)
+      end
+    end
     if closed_net then record_trade(m, closed_net) end
     local lot
     if left > 0 then
-      lot = { sgn = sgn, px = px, qty = left, fee_unit = fee / q, tn = opt.tn, t = t }
+      lot = { sgn = sgn, px = px, qty = left, fee_unit = fee / q, tn = opt.tn, t = t, pinned = opt.pin or nil }
       m.lots[#m.lots + 1] = lot
     end
     M.recalc(m)
@@ -149,9 +163,11 @@ return function(X)
     local m = M.get(inst)
     local bk = inst.bk or {}
     local ug, exit_fee = 0, 0
-    if m.pos ~= 0 and m.avg and bk.valid then
-      ug = (bk.mid - m.avg) * m.pos * (inst.point or 0)
-      exit_fee = M.fee(inst, abs(m.pos), bk.mid, false)
+    if #m.lots > 0 and bk.valid then
+      for _, l in ipairs(m.lots) do                      -- every open lot (pinned pairs may be on both sides)
+        ug = ug + (bk.mid - l.px) * l.sgn * l.qty * (inst.point or 0)
+        exit_fee = exit_fee + M.fee(inst, l.qty, bk.mid, false)
+      end
     end
     local real_net = m.realized - (m.fees - m.open_fee)
     local unreal_net = ug - m.open_fee - exit_fee
@@ -290,7 +306,7 @@ return function(X)
     m.lots = {}
     for _, l in ipairs((s and s.lots) or {}) do
       if (l.qty or 0) > 0 then
-        m.lots[#m.lots + 1] = { sgn = l.sgn, px = l.px, qty = l.qty, fee_unit = l.fee_unit or 0, tn = l.tn, t = l.t, tp = l.tp }
+        m.lots[#m.lots + 1] = { sgn = l.sgn, px = l.px, qty = l.qty, fee_unit = l.fee_unit or 0, tn = l.tn, t = l.t, tp = l.tp, pinned = l.pinned }
       end
     end
     if s and same_day then

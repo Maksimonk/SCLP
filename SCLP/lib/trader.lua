@@ -147,7 +147,10 @@ return function(X)
     if o.src == "tp" then
       for _, l in ipairs(X.M.get(inst).lots) do if l.tp == o.tid then own_lot = l; break end end
     end
-    local net, lot = X.M.on_fill(inst, o, q, px, t, { tn = tn, close_lot = own_lot })
+    -- counter mode: every arrow-key fill is its own pair (it gets its own counter even if it reduces the net
+    -- position - you may quote both sides on purpose)
+    local pin = (o.src == "key" and (X.st.tp or 0) > 0) or nil
+    local net, lot = X.M.on_fill(inst, o, q, px, t, { tn = tn, close_lot = own_lot, pin = pin })
     local p = X.panic
     if p and o.src == "panic" and p.left then p.left = p.left + (o.side == "B" and q or -q) end
     X.flash_fill(o.side)
@@ -171,38 +174,20 @@ return function(X)
     local function skip(why)
       U.log(string.format("[%s] COUNTER skipped for lot %d @ %s: %s (pos %+d)", inst.sec, lot.qty, inst:px_str(px), why, pos))
     end
-    if (side == "S" and pos <= 0) or (side == "B" and pos >= 0) then return skip("no position to close") end
-    local closing = 0
-    for _, w in ipairs(X.O.working(inst, side)) do
-      if reduce_src(w.src) then closing = closing + (w.qty - w.filled) end
-    end
-    q = min(q, abs(pos) - closing)
-    if q <= 0 then return skip(string.format("counter orders already cover the position (%d)", closing)) end
+    if q <= 0 then return skip("nothing to cover") end
     local ok, why = X.R.can_reduce(inst, t)
-    if not ok then return skip(why) end
-    local profit_floor = T.counter_floor(inst, side, lot)
-    -- your own arrow-key order already resting on the counter side (you quoted both sides) IS the counter:
-    -- it is adopted instead of adding a second order, otherwise both fill and the position overshoots
-    -- (13:22:44 live: sell 246375 filled with a buy 246350 already resting -> a 2nd buy 246350 -> long +1)
-    for _, w in ipairs(X.O.working(inst, side)) do
-      if q <= 0 then break end
-      local rem = w.qty - w.filled
-      local good = (side == "S" and w.px >= profit_floor) or (side == "B" and w.px <= profit_floor)
-      if w.src == "key" and not w.want_kill and rem > 0 and rem <= q and good then
-        w.src = "tp"
-        lot.tp = w.tid
-        q = q - rem
-        U.log(string.format("[%s] COUNTER: own %s %d @ %s adopted for lot @ %s", inst.sec, side, rem, inst:px_str(w.px), inst:px_str(px)))
-      end
+    if not ok then
+      X.pending_tp = true                              -- e.g. one side of the book is empty: retry when it is back
+      return skip(why .. " - will retry")
     end
-    if q <= 0 then return nil end
+    local profit_floor = T.counter_floor(inst, side, lot)
     -- counter order after a fill: N ticks from the CURRENT MARKET on its own side (like the arrow keys:
     -- sell = best ask + N, buy = best bid - N), not from the fill price - a fill-based price could be far from the
     -- market (never filled) or on the other side of it (rejected by BoC)
     X.B.read(inst, t)
     local bk = inst.bk
     local best = (side == "S") and (bk.shown_ba or bk.ba) or (bk.shown_bb or bk.bb)
-    if not best then return skip("no best price in the book") end
+    if not best then X.pending_tp = true; return skip("no best price in the book - will retry") end
     local n = math.max(0, X.st.offset or 0)          -- the same global offset as the arrow keys
     local want = (side == "S") and (best + n) or (best - n)
     -- ALWAYS (no switch): the counter order earns at least max(offset, 1) tick against ITS OWN fill, fees included.
@@ -323,12 +308,15 @@ return function(X)
   -- MAINTENANCE: take-profit orders never exceed the open position
   ------------------------------------------------------------------
   hygiene = function(inst, t)
-    local pos = X.M.get(inst).pos
+    local m = X.M.get(inst)
+    local pos = m.pos
+    local pair = {}                                    -- counters of open pinned pairs are never touched
+    for _, l in ipairs(m.lots) do if l.pinned and l.tp then pair[l.tp] = true end end
     for _, side in ipairs({ "B", "S" }) do
       local closing = (side == "S" and pos > 0) or (side == "B" and pos < 0)
       local list, total = {}, 0
       for _, w in ipairs(X.O.working(inst, side)) do
-        if reduce_src(w.src) and not w.want_kill then list[#list + 1] = w; total = total + (w.qty - w.filled) end
+        if reduce_src(w.src) and not w.want_kill and not pair[w.tid] then list[#list + 1] = w; total = total + (w.qty - w.filled) end
       end
       if not closing then
         for _, w in ipairs(list) do w.replace = nil; X.O.cancel(w, "position closed", t) end
