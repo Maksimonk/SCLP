@@ -283,7 +283,7 @@ function main()
       U.log_every("steperr", 5, "STEP ERROR: " .. tostring(err2):gsub("\n", " | "))
       if errors > 100 then U.alert("too many errors - stopping (orders stay, state saved)", 3); X.running = false end
     end
-    sleep(X.cfg.LOOP_MS or 2)
+    sleep(X.cfg.LOOP_MS or 1)
   end
   pcall(X.shutdown)
 end

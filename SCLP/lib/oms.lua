@@ -55,9 +55,9 @@ return function(X)
   ------------------------------------------------------------------
   -- RATE LIMIT (token bucket, MAX_TX_PER_SEC; MOEX login base throughput is 30 tx/s)
   ------------------------------------------------------------------
-  local bucket = { tokens = 5, t = nil }
+  local bucket = { tokens = 30, t = nil }
   local function take(t)
-    local rate = X.cfg.MAX_TX_PER_SEC or 20
+    local rate = X.cfg.MAX_TX_PER_SEC or 30
     if bucket.t then bucket.tokens = min(rate, bucket.tokens + (t - bucket.t) * rate) end
     bucket.t = t
     if bucket.tokens >= 1 then bucket.tokens = bucket.tokens - 1; return true end

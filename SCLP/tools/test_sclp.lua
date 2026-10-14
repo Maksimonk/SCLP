@@ -119,8 +119,10 @@ check(t1 and t1[cp("Условие исполнения")] == cp("Только �
 check(t1 and t1[cp("К/П")] == cp("Покупка") and t1[cp("Цена")] == "70.00", "buy at best bid 70.00 (offset 0)")
 SIM.run(0.2)
 check(#live("B") == 1, "buy is resting")
-key(UP)
-check(#live("B") == 1, "key auto-repeat within 250 ms ignored")
+key(UP); SIM.run(0.2)
+check(#live("B") == 2, "no delay between presses: a second press 20 ms later is a second order")
+key(66); SIM.run(0.3)                             -- back to one resting buy
+key(UP); SIM.run(0.2)
 SIM.run(0.3)
 key(LEFT)
 check(SCLP.st.offset == 0, "offset cannot go below 0")

@@ -20,8 +20,9 @@ return {
   -- Hard limits (fat-finger protection)
   ------------------------------------------------------------------
   OFFSET_MAX = 50,
-  MAX_TX_PER_SEC = 20,         -- transactions per second (MOEX login base: 30)
-  KEY_COOLDOWN_MS = 250,       -- one order per side per N ms (keyboard auto-repeat)
+  MAX_TX_PER_SEC = 30,         -- transactions per second (MOEX login base: 30)
+  KEY_COOLDOWN_MS = 0,         -- min pause between orders of one side, ms (0 = every press; HOLDING an arrow then
+                               -- sends an order per keyboard auto-repeat, ~30/s - set e.g. 150 to guard against it)
   OTR_WARN = 20,               -- warn above N transactions (orders + cancels) per fill
 
   ------------------------------------------------------------------
@@ -105,7 +106,7 @@ return {
   CANCEL_ON_STOP = false,      -- false: orders stay in the book and are re-attached on the next start
   MARKOUT_SEC = { 1, 5, 30 },
   SNAPSHOT_SEC = 60,
-  LOOP_MS = 2,
+  LOOP_MS = 1,                 -- main loop pause, ms (key -> send = queue wait <= this + Windows timer)
   UI_REFRESH_SEC = 0.2,
   UI_POS = { 20, 20, 1080, 470 },
   SHOW_WINDOW = true,

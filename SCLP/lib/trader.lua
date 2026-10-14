@@ -70,8 +70,8 @@ return function(X)
   function T.key_order(side, t_key, t)
     local inst = X.inst
     if not inst then X.say("Сначала выберите инструмент"); return end
-    local cd = (X.cfg.KEY_COOLDOWN_MS or 250) / 1000
-    if t_key - (last_key[side] or -1e9) < cd then return end             -- key auto-repeat
+    local cd = (X.cfg.KEY_COOLDOWN_MS or 0) / 1000
+    if cd > 0 and t_key - (last_key[side] or -1e9) < cd then return end  -- optional auto-repeat guard
     last_key[side] = t_key
     X.B.read(inst, t)                                                    -- freshest book for pricing
     local qty, offset = X.st.qty, X.st.offset
