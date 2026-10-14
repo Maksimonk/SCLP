@@ -175,6 +175,21 @@ SIM.run(0.2)
 check(mx().pos == 1, "position +1")
 local tp = live("S")[1]
 check(tp and tp.px == 7005, "counter sell from the market: ask 70.03 + 2 = 70.05 (not from the fill price)")
+key(67); SIM.run(0.3)
+SIM.book("BMX6", { { 6990, 10 } }, { { 6993, 10 } }); SIM.run(0.3)   -- market falls under the entry
+SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
+tp = live("S")[1]
+-- break-even 70.00 + (0.50 + 0.50) / 0.80 = 70.0125 -> + 2 = 70.0325 -> 70.04 (market would give 69.95)
+check(tp and tp.px == 7004, "counter not worse than break-even + 2 = 70.04, got " .. tostring(tp and tp.px))
+key(71)                                                              -- G off
+key(67); SIM.run(0.3)
+SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
+tp = live("S")[1]
+check(tp and tp.px == 6995, "G off: purely from the market 69.93 + 2 = 69.95")
+key(71)
+key(67); SIM.run(0.3)
+reset_book()
+SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 SIM.trade("BMX6", 1, 7005, 60)
 SIM.run(0.2)
 check(mx().pos == 0, "flat after TP")

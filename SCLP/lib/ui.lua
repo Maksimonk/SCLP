@@ -342,7 +342,8 @@ return function(X)
 
   local function toggle(id)
     local st = X.st
-    if id == "requote" then st.requote = not st.requote; X.say("Перестановка закрывающих заявок " .. (st.requote and "ВКЛ" or "ВЫКЛ"))
+    if id == "tp_be" then st.tp_be = not st.tp_be; X.say("Встречная не хуже безубытка+N: " .. (st.tp_be and "ВКЛ" or "ВЫКЛ"))
+    elseif id == "requote" then st.requote = not st.requote; X.say("Перестановка закрывающих заявок " .. (st.requote and "ВКЛ" or "ВЫКЛ"))
     elseif id == "skew" then st.skew = not st.skew; X.say("Перекос от позиции " .. (st.skew and "ВКЛ" or "ВЫКЛ"))
     elseif id == "tp" then
       if (st.tp or 0) > 0 then st.tp_last = st.tp; st.tp = 0 else st.tp = st.tp_last or X.cfg.TP_TICKS_DEFAULT or 2 end
@@ -374,6 +375,7 @@ return function(X)
     elseif vk == 84 then toggle("tp")                              -- T
     elseif vk == 82 then toggle("requote")                         -- R
     elseif vk == 75 then toggle("skew")                            -- K
+    elseif vk == 71 then toggle("tp_be")                           -- G
     elseif vk == 65 then                                           -- A: adopt exchange position after a mismatch
       if X.block and confirm("adopt", t, "Принять позицию QUIK: нажмите A ещё раз в течение 2 секунд") then X.S.adopt_exchange(t) end
     elseif vk == 72 then                                           -- H: pause / resume
@@ -466,7 +468,7 @@ return function(X)
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
     vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
-    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: продажа = аск+" .. st.tp .. " / покупка = бид-" .. st.tp) or "ВЫКЛ")
+    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: продажа = аск+" .. st.tp .. " / покупка = бид-" .. st.tp .. (st.tp_be ~= false and ", не хуже безубытка±" .. st.tp .. " [G]" or ", без безубытка [G]")) or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрытие по F, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"
@@ -477,7 +479,7 @@ return function(X)
     vals.msg = X.last_msg or ""
     vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, + / - - объём"
     vals.keys2 = "B/S - снять покупки/продажи, C или Esc - снять все, F - закрыть пассивно, H - пауза"
-    vals.keys3 = "R - перестановка закрытия F, T - встречная после исполнения, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
+    vals.keys3 = "R - перестановка закрытия F, T - встречная после исполнения, G - её безубыток, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
     local R = {}
     if inst then
       local bk = inst.bk

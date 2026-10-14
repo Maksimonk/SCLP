@@ -14,6 +14,7 @@ return {
   QTY = 1,
   TP_TICKS = 0,                -- take-profit distance (0 = off); T toggles between 0 and the last value
   TP_TICKS_DEFAULT = 2,
+  TP_NOT_BELOW_BE = true,      -- counter order not worse than break-even + N (G toggles)
   SKEW = false,                -- inventory skew (K toggles)
   MAX_DAY_LOSS_RUB = 3000,     -- session equity (realized + open, net of fees) <= -N -> stop (+ PANIC)
 

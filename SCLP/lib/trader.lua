@@ -174,6 +174,15 @@ return function(X)
     if not best then return end
     local n = X.st.tp
     local want = (side == "S") and (best + n) or (best - n)
+    -- option G (on by default): never worse than break-even + N (position average + fees), so a market that
+    -- moved against the fill does not turn the counter order into a loss
+    if X.st.tp_be ~= false then
+      local be = X.M.breakeven(inst, side)
+      if be then
+        if side == "S" then want = math.max(want, math.ceil(be + n - 1e-9))
+        else want = math.min(want, math.floor(be - n + 1e-9)) end
+      end
+    end
     local cap = X.B.passive_cap(inst, side)
     if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end
     if not X.I.in_limits(inst, want) then return end
