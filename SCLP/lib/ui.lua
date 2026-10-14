@@ -87,6 +87,15 @@ return function(X)
     if w < 50 or h < 30 or w > 10000 or h > 10000 then return nil end
     return { left, top, w, h }
   end
+  -- column widths (in characters). QLua cannot READ widths changed with the mouse (no API for it), so they are
+  -- set from UI_COL_WIDTHS in sclp_config.lua: { main = {30, 44, 28, 30}, avg = {30, 24}, report = {160} }
+  function W.widths(name, def)
+    local w = (X.cfg.UI_COL_WIDTHS or {})[name]
+    local r = {}
+    for i, d in ipairs(def) do r[i] = (type(w) == "table" and tonumber(w[i])) or d end
+    return r
+  end
+
   -- create-time placement: the remembered rectangle, else the default one
   local function place(id, name, x, y, w, h)
     load_pos()
@@ -114,8 +123,9 @@ return function(X)
     if X.cfg.SHOW_WINDOW == false or not api() or AVG.id then return end
     pcall(function()
       local id = AllocTable()
-      AddColumn(id, 1, enc("Показатель"), true, QTABLE_STRING_TYPE, 30)
-      AddColumn(id, 2, enc("Значение"), true, QTABLE_STRING_TYPE, 24)
+      local cw = W.widths("avg", { 30, 24 })
+      AddColumn(id, 1, enc("Показатель"), true, QTABLE_STRING_TYPE, cw[1])
+      AddColumn(id, 2, enc("Значение"), true, QTABLE_STRING_TYPE, cw[2])
       CreateWindow(id)
       SetWindowCaption(id, enc("SCLP: средние цены"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
@@ -178,10 +188,11 @@ return function(X)
     if X.cfg.SHOW_WINDOW == false or not api() then return end
     local ok, err = pcall(function()
       local id = AllocTable()
-      AddColumn(id, 1, enc("Параметр"), true, QTABLE_STRING_TYPE, 30)
-      AddColumn(id, 2, enc("Значение"), true, QTABLE_STRING_TYPE, 44)
-      AddColumn(id, 3, enc("Метрика"), true, QTABLE_STRING_TYPE, 28)
-      AddColumn(id, 4, enc("Значение"), true, QTABLE_STRING_TYPE, 30)
+      local cw = W.widths("main", { 30, 44, 28, 30 })
+      AddColumn(id, 1, enc("Параметр"), true, QTABLE_STRING_TYPE, cw[1])
+      AddColumn(id, 2, enc("Значение"), true, QTABLE_STRING_TYPE, cw[2])
+      AddColumn(id, 3, enc("Метрика"), true, QTABLE_STRING_TYPE, cw[3])
+      AddColumn(id, 4, enc("Значение"), true, QTABLE_STRING_TYPE, cw[4])
       CreateWindow(id)
       SetWindowCaption(id, enc("SCLP"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }
@@ -217,7 +228,7 @@ return function(X)
     pcall(function()
       if REP.id and DestroyTable then DestroyTable(REP.id) end
       local id = AllocTable()
-      AddColumn(id, 1, enc("Отчёт о восстановлении (" .. U.stamp() .. ")"), true, QTABLE_STRING_TYPE, 160)
+      AddColumn(id, 1, enc("Отчёт о восстановлении (" .. U.stamp() .. ")"), true, QTABLE_STRING_TYPE, W.widths("report", { 160 })[1])
       CreateWindow(id)
       SetWindowCaption(id, enc(title or "SCLP: восстановление после запуска"))
       local p = X.cfg.UI_POS or { 20, 20, 1080, 470 }

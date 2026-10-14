@@ -138,6 +138,8 @@ return function(X)
   ------------------------------------------------------------------
   -- ORDER EVENTS
   ------------------------------------------------------------------
+  local hygiene                                   -- defined below; called right after each fill
+
   function T.on_fill(o, q, px, t, tn)
     local inst = o.inst
     -- a counter order closes the lot it was placed for (its P&L is that pair), the rest goes FIFO
@@ -151,6 +153,8 @@ return function(X)
     X.flash_fill(o.side)
     X.say(string.format("ИСПОЛНЕНО %s %d @ %s%s", o.side == "B" and "покупка" or "продажа", q, inst:px_str(px),
       net and string.format(", закрыто %+.2f руб", net) or ""))
+    -- counter orders that no longer have a position to close are cancelled at once, not on the next tick
+    if inst == X.inst then hygiene(inst, t) end
     if o.src == "key" and (X.st.tp or 0) > 0 and inst == X.inst then
       if lot then T.place_tp(inst, o.side, lot, t)
       else U.log(string.format("[%s] COUNTER skipped: fill %s %d @ %s only closed an existing position (pos %+d)",
@@ -176,6 +180,22 @@ return function(X)
     if q <= 0 then return skip(string.format("counter orders already cover the position (%d)", closing)) end
     local ok, why = X.R.can_reduce(inst, t)
     if not ok then return skip(why) end
+    local profit_floor = T.counter_floor(inst, side, lot)
+    -- your own arrow-key order already resting on the counter side (you quoted both sides) IS the counter:
+    -- it is adopted instead of adding a second order, otherwise both fill and the position overshoots
+    -- (13:22:44 live: sell 246375 filled with a buy 246350 already resting -> a 2nd buy 246350 -> long +1)
+    for _, w in ipairs(X.O.working(inst, side)) do
+      if q <= 0 then break end
+      local rem = w.qty - w.filled
+      local good = (side == "S" and w.px >= profit_floor) or (side == "B" and w.px <= profit_floor)
+      if w.src == "key" and not w.want_kill and rem > 0 and rem <= q and good then
+        w.src = "tp"
+        lot.tp = w.tid
+        q = q - rem
+        U.log(string.format("[%s] COUNTER: own %s %d @ %s adopted for lot @ %s", inst.sec, side, rem, inst:px_str(w.px), inst:px_str(px)))
+      end
+    end
+    if q <= 0 then return nil end
     -- counter order after a fill: N ticks from the CURRENT MARKET on its own side (like the arrow keys:
     -- sell = best ask + N, buy = best bid - N), not from the fill price - a fill-based price could be far from the
     -- market (never filled) or on the other side of it (rejected by BoC)
@@ -186,12 +206,8 @@ return function(X)
     local n = math.max(0, X.st.offset or 0)          -- the same global offset as the arrow keys
     local want = (side == "S") and (best + n) or (best - n)
     -- ALWAYS (no switch): the counter order earns at least max(offset, 1) tick against ITS OWN fill, fees included.
-    -- The market price is used only when it is better. (A switchable version once let a sell at 245900 get a
-    -- counter buy at 245925.)
-    local gap = math.max(n, 1)
-    local fee_ticks = (lot.fee_unit + X.M.fee(inst, 1, lot.px, false)) / math.max(inst.point or 1, 1e-9)
-    if side == "S" then want = math.max(want, math.ceil(lot.px + fee_ticks + gap - 1e-9))
-    else want = math.min(want, math.floor(lot.px - fee_ticks - gap + 1e-9)) end
+    -- The market price is used only when it is better.
+    if side == "S" then want = math.max(want, profit_floor) else want = math.min(want, profit_floor) end
     local cap = X.B.passive_cap(inst, side)
     if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end
     if not X.I.in_limits(inst, want) then return skip("price outside the exchange limits") end
@@ -202,6 +218,14 @@ return function(X)
       U.log(string.format("[%s] TP %s %d @ %s for lot @ %s", inst.sec, side, q, inst:px_str(want), inst:px_str(px)))
     end
     return tpo
+  end
+
+  -- the worst allowed counter price for a lot: own fill -/+ (fees + max(offset, 1) tick)
+  function T.counter_floor(inst, side, lot)
+    local gap = math.max(X.st.offset or 0, 1)
+    local fee_ticks = (lot.fee_unit + X.M.fee(inst, 1, lot.px, false)) / math.max(inst.point or 1, 1e-9)
+    if side == "S" then return math.ceil(lot.px + fee_ticks + gap - 1e-9) end
+    return math.floor(lot.px - fee_ticks - gap + 1e-9)
   end
 
   -- after a restart: open lots whose take-profit order is gone get a new one (passive-only, capped by position)
@@ -298,7 +322,7 @@ return function(X)
   ------------------------------------------------------------------
   -- MAINTENANCE: take-profit orders never exceed the open position
   ------------------------------------------------------------------
-  local function hygiene(inst, t)
+  hygiene = function(inst, t)
     local pos = X.M.get(inst).pos
     for _, side in ipairs({ "B", "S" }) do
       local closing = (side == "S" and pos > 0) or (side == "B" and pos < 0)

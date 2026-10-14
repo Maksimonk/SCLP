@@ -109,5 +109,6 @@ return {
   LOOP_MS = 1,                 -- main loop pause, ms (key -> send = queue wait <= this + Windows timer)
   UI_REFRESH_SEC = 0.2,
   UI_POS = { 20, 20, 1080, 470 },
+  UI_COL_WIDTHS = { main = { 30, 44, 28, 30 }, avg = { 30, 24 }, report = { 160 } },   -- column widths, characters
   SHOW_WINDOW = true,
 }

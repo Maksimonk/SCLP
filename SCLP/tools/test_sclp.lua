@@ -624,6 +624,27 @@ mx_book(9830, 9831)
 SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 check(#mlive("B") >= 1, "counter restored for the remaining lot")
 
+------------------------------------------------------------------
+T_("TEST 23: live 13:22 - both sides quoted with T on: the resting arrow-key order becomes the counter (no overshoot)")
+key(67); SIM.run(0.3)
+local p23 = mx().pos
+SCLP.st.tp, SCLP.st.offset = 1, 0
+if p23 ~= 0 then                                       -- flatten whatever is left from TEST 22
+  mx_book(9830, 9831)
+  key(p23 > 0 and DOWN or UP); SIM.run(0.3)
+  SIM.trade("MXZ6", p23 > 0 and 1 or -1, p23 > 0 and 9831 or 9830, 50); SIM.run(0.5)
+  key(67); SIM.run(0.3)
+end
+check(mx().pos == 0, "flat before the scenario")
+mx_book(9854, 9855)                                    -- 246350 / 246375
+key(UP); key(DOWN); key(UP); key(DOWN); SIM.run(0.3)   -- buy, sell, buy, sell in a fraction of a second
+check(#mlive("B") == 2 and #mlive("S") == 2, "2 buys @ 246350, 2 sells @ 246375")
+SIM.trade("MXZ6", 1, 9855, 30); SIM.run(0.3)           -- both sells fill
+check(#mlive("B") == 2, "no extra counter buys: the 2 resting buys were adopted as counters, got " .. #mlive("B"))
+SIM.trade("MXZ6", -1, 9854, 30); SIM.run(0.3)          -- both buys fill
+check(mx().pos == 0, "flat - no overshoot (live: ended long +1), got " .. mx().pos)
+check(#mlive("B") + #mlive("S") == 0, "nothing left resting")
+
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)
