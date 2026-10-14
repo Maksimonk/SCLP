@@ -146,8 +146,10 @@ return function(X)
     X.flash_fill(o.side)
     X.say(string.format("ИСПОЛНЕНО %s %d @ %s%s", o.side == "B" and "покупка" or "продажа", q, inst:px_str(px),
       net and string.format(", закрыто %+.2f руб", net) or ""))
-    if lot and o.src == "key" and (X.st.tp or 0) > 0 and inst == X.inst then
-      T.place_tp(inst, o.side, lot, t)
+    if o.src == "key" and (X.st.tp or 0) > 0 and inst == X.inst then
+      if lot then T.place_tp(inst, o.side, lot, t)
+      else U.log(string.format("[%s] COUNTER skipped: fill %s %d @ %s only closed an existing position (pos %+d)",
+        inst.sec, o.side, q, inst:px_str(px), X.M.get(inst).pos)) end
     end
   end
 
@@ -157,21 +159,25 @@ return function(X)
     local side = opp(fill_side)
     local q, px = lot.qty, lot.px
     local pos = X.M.get(inst).pos
-    if (side == "S" and pos <= 0) or (side == "B" and pos >= 0) then return end
+    local function skip(why)
+      U.log(string.format("[%s] COUNTER skipped for lot %d @ %s: %s (pos %+d)", inst.sec, lot.qty, inst:px_str(px), why, pos))
+    end
+    if (side == "S" and pos <= 0) or (side == "B" and pos >= 0) then return skip("no position to close") end
     local closing = 0
     for _, w in ipairs(X.O.working(inst, side)) do
       if reduce_src(w.src) then closing = closing + (w.qty - w.filled) end
     end
     q = min(q, abs(pos) - closing)
-    if q <= 0 then return end
-    if not X.R.can_reduce(inst, t) then return end
+    if q <= 0 then return skip(string.format("counter orders already cover the position (%d)", closing)) end
+    local ok, why = X.R.can_reduce(inst, t)
+    if not ok then return skip(why) end
     -- counter order after a fill: N ticks from the CURRENT MARKET on its own side (like the arrow keys:
     -- sell = best ask + N, buy = best bid - N), not from the fill price - a fill-based price could be far from the
     -- market (never filled) or on the other side of it (rejected by BoC)
     X.B.read(inst, t)
     local bk = inst.bk
     local best = (side == "S") and (bk.shown_ba or bk.ba) or (bk.shown_bb or bk.bb)
-    if not best then return end
+    if not best then return skip("no best price in the book") end
     local n = math.max(0, X.st.offset or 0)          -- the same global offset as the arrow keys
     local want = (side == "S") and (best + n) or (best - n)
     -- option G (on by default): never worse than break-even + N (position average + fees), so a market that
@@ -186,8 +192,9 @@ return function(X)
     end
     local cap = X.B.passive_cap(inst, side)
     if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end
-    if not X.I.in_limits(inst, want) then return end
-    local tpo = X.O.place(inst, side, want, q, { src = "tp", parent = lot.tn, px0 = want }, t)
+    if not X.I.in_limits(inst, want) then return skip("price outside the exchange limits") end
+    local tpo, err = X.O.place(inst, side, want, q, { src = "tp", parent = lot.tn, px0 = want }, t)
+    if not tpo then return skip("not sent: " .. tostring(err)) end
     if tpo then
       lot.tp = tpo.tid
       U.log(string.format("[%s] TP %s %d @ %s for lot @ %s", inst.sec, side, q, inst:px_str(want), inst:px_str(px)))
