@@ -464,7 +464,7 @@ return function(X)
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
     vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
-    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: продажа = аск+" .. st.offset .. " / покупка = бид-" .. st.offset .. (st.tp_be ~= false and ", не хуже безубытка±" .. st.offset .. " [G]" or ", без безубытка [G]")) or "ВЫКЛ")
+    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: продажа = аск+" .. st.offset .. " / покупка = бид-" .. st.offset .. (st.tp_be ~= false and ", прибыль от безубытка не меньше " .. math.max(1, st.offset) .. " тик. [G]" or ", без безубытка [G]")) or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрытие по F, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"

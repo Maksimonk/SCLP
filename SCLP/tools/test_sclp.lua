@@ -189,6 +189,12 @@ tp = live("S")[1]
 check(tp and tp.px == 6995, "G off: purely from the market 69.93 + 2 = 69.95")
 key(71)
 key(67); SIM.run(0.3)
+SCLP.st.offset = 0                                                   -- offset 0: still >= 1 tick of profit
+SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
+tp = live("S")[1]
+check(tp and tp.px == 7003, "offset 0: break-even 70.0125 + 1 tick = 70.0225 -> 70.03, got " .. tostring(tp and tp.px))
+key(67); SIM.run(0.3)
+SCLP.st.offset = 2
 reset_book()
 SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 SIM.trade("BMX6", 1, 7005, 60)

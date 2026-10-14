@@ -179,8 +179,9 @@ return function(X)
     if X.st.tp_be ~= false then
       local be = X.M.breakeven(inst, side)
       if be then
-        if side == "S" then want = math.max(want, math.ceil(be + n - 1e-9))
-        else want = math.min(want, math.floor(be - n + 1e-9)) end
+        local gap = math.max(n, 1)                     -- at least 1 tick of profit, even with offset 0
+        if side == "S" then want = math.max(want, math.ceil(be + gap - 1e-9))
+        else want = math.min(want, math.floor(be - gap + 1e-9)) end
       end
     end
     local cap = X.B.passive_cap(inst, side)
