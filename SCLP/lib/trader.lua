@@ -172,7 +172,7 @@ return function(X)
     local bk = inst.bk
     local best = (side == "S") and (bk.shown_ba or bk.ba) or (bk.shown_bb or bk.bb)
     if not best then return end
-    local n = X.st.tp
+    local n = math.max(0, X.st.offset or 0)          -- the same global offset as the arrow keys
     local want = (side == "S") and (best + n) or (best - n)
     -- option G (on by default): never worse than break-even + N (position average + fees), so a market that
     -- moved against the fill does not turn the counter order into a loss

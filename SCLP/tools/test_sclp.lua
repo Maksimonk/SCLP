@@ -167,9 +167,10 @@ check(SCLP.st.offset == 0, "offset back to 0")
 
 ------------------------------------------------------------------
 T_("TEST 4: fill -> take-profit -> closed trade, net P&L with broker fee, markouts")
-SCLP.st.tp = 2
+SCLP.st.tp = 1
 SIM.run(0.3)
-key(UP); SIM.run(0.2)                             -- buy 70.00
+key(UP); SIM.run(0.2)                             -- buy 70.00 (offset 0)
+SCLP.st.offset = 2                                -- the counter order uses the global offset at fill time
 SIM.trade("BMX6", -1, 7000, 20)                   -- seller hits the bid (queue 10 first, then us)
 SIM.run(0.2)
 check(mx().pos == 1, "position +1")
@@ -200,7 +201,7 @@ check(math.abs(v.real_net - 3.0) < 1e-9, "net = 4.00 - 2 x 0.50 fee = 3.00, got 
 SIM.run(31)
 check(mx().mk_n == 2, "markouts of both fills computed")
 check(SCLP.O.st.taker_suspect == 0, "no taker fills")
-SCLP.st.tp = 0
+SCLP.st.tp, SCLP.st.offset = 0, 0
 
 ------------------------------------------------------------------
 T_("TEST 5: orders are never moved by the script")
@@ -389,7 +390,7 @@ SIM.run(0.5)
 ------------------------------------------------------------------
 T_("TEST 11: restart with an active order, a partial fill while the script is off")
 reset_book()
-SCLP.st.tp = 3
+SCLP.st.tp = 1
 key(UP); SIM.run(0.2)                             -- buy 1 @ 70.00 -> fill -> TP @ 70.03
 SIM.trade("BMX6", -1, 7000, 30); SIM.run(0.2)
 reset_book()
