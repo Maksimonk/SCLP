@@ -29,7 +29,7 @@ return function(X)
     { id = "inst", label = "Инструмент [2xклик]", edit = "text" },
     { id = "offset", label = "Отступ, тиков [Влево/Вправо]", edit = "int" },
     { id = "qty", label = "Объём, лотов [+/-]", edit = "int" },
-    { id = "tp", label = "Тейк-профит, тиков [T]", edit = "int" },
+    { id = "tp", label = "Встречная после исполнения, тиков [T]", edit = "int" },
     { id = "requote", label = "Перестановка закрытия F [R]" },
     { id = "skew", label = "Перекос от позиции [K]" },
     { id = "max_pos", label = "Лимит позиции" },
@@ -346,7 +346,7 @@ return function(X)
     elseif id == "skew" then st.skew = not st.skew; X.say("Перекос от позиции " .. (st.skew and "ВКЛ" or "ВЫКЛ"))
     elseif id == "tp" then
       if (st.tp or 0) > 0 then st.tp_last = st.tp; st.tp = 0 else st.tp = st.tp_last or X.cfg.TP_TICKS_DEFAULT or 2 end
-      X.say("Тейк-профит " .. ((st.tp > 0) and (st.tp .. " тиков") or "ВЫКЛ"))
+      X.say("Встречная после исполнения " .. ((st.tp > 0) and ("ВКЛ, " .. st.tp .. " тиков от цены исполнения") or "ВЫКЛ"))
     end
     X.S.mark_settings()
   end
@@ -466,7 +466,7 @@ return function(X)
     vals.inst = vals.inst or (inst and X.I.describe(inst) or (st.inst_text or "не выбран"))
     vals.offset = vals.offset or string.format("%d  (покупка = бид-%d, продажа = аск+%d)", st.offset, st.offset, st.offset)
     vals.qty = vals.qty or tostring(st.qty)
-    vals.tp = vals.tp or (((st.tp or 0) > 0) and (st.tp .. " тиков от исполнения") or "ВЫКЛ")
+    vals.tp = vals.tp or (((st.tp or 0) > 0) and ("ВКЛ: " .. st.tp .. " тиков от цены исполнения") or "ВЫКЛ")
     vals.requote = st.requote and "ВКЛ: только закрытие по F, не хуже безубытка" or "ВЫКЛ: все заявки стоят на месте"
     vals.skew = st.skew and string.format("ВКЛ (%.2f тика на лот)", X.cfg.SKEW_TICKS_PER_LOT or 0.5) or "ВЫКЛ"
     vals.max_pos = "нет (контроль позиции - ваш; лимит убытка дня действует)"
@@ -477,7 +477,7 @@ return function(X)
     vals.msg = X.last_msg or ""
     vals.keys1 = "Вверх - КУПИТЬ, Вниз - ПРОДАТЬ, Влево/Вправо - отступ -/+, + / - - объём"
     vals.keys2 = "B/S - снять покупки/продажи, C или Esc - снять все, F - закрыть пассивно, H - пауза"
-    vals.keys3 = "R - перестановка закрытия F, T - тейк, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
+    vals.keys3 = "R - перестановка закрытия F, T - встречная после исполнения, K - перекос, P,P - PANIC, A,A - принять позицию QUIK"
     local R = {}
     if inst then
       local bk = inst.bk
