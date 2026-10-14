@@ -181,18 +181,12 @@ SIM.book("BMX6", { { 6990, 10 } }, { { 6993, 10 } }); SIM.run(0.3)   -- market f
 SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 tp = live("S")[1]
 -- break-even 70.00 + (0.50 + 0.50) / 0.80 = 70.0125 -> + 2 = 70.0325 -> 70.04 (market would give 69.95)
-check(tp and tp.px == 7004, "counter not worse than break-even + 2 = 70.04, got " .. tostring(tp and tp.px))
-key(71)                                                              -- G off
-key(67); SIM.run(0.3)
-SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
-tp = live("S")[1]
-check(tp and tp.px == 6995, "G off: purely from the market 69.93 + 2 = 69.95")
-key(71)
+check(tp and tp.px == 7004, "counter not worse than own fill 70.00 + fees 1.25 + 2 = 70.0325 -> 70.04, got " .. tostring(tp and tp.px))
 key(67); SIM.run(0.3)
 SCLP.st.offset = 0                                                   -- offset 0: still >= 1 tick of profit
 SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
 tp = live("S")[1]
-check(tp and tp.px == 7003, "offset 0: break-even 70.0125 + 1 tick = 70.0225 -> 70.03, got " .. tostring(tp and tp.px))
+check(tp and tp.px == 7003, "offset 0: own fill 70.00 + fees 1.25 + 1 tick = 70.0225 -> 70.03, got " .. tostring(tp and tp.px))
 key(67); SIM.run(0.3)
 SCLP.st.offset = 2
 reset_book()
@@ -589,6 +583,44 @@ SCLP.running = false
 start()
 local mp = UI.tables[1].pos
 check(mp and mp[1] == 300 and mp[2] == 200 and mp[3] == 900 and mp[4] == 400, "main window restored at the saved place")
+
+------------------------------------------------------------------
+T_("TEST 22: live MXZ6 cases - counter never at or beyond the own fill; counter P&L against its own lot")
+SCLP.running = false
+wipe_state()
+fresh_exchange()
+SIM.add_sec("MXZ6", 25, 0, 25, 20261218)
+local function mx_book(b, a) SIM.book("MXZ6", { { b, 10 } }, { { a, 10 } }); SIM.run(0.3) end
+mx_book(9835, 9836)                                  -- 245875 / 245900
+start(base_cfg({ DEFAULT_INSTRUMENT = "SPBFUT MXZ6", TP_TICKS = 1, FEES = { SPBFUT = { BROKER_RUB = 0 } } }))
+check(inst().sec == "MXZ6", "MXZ6 active")
+local function mlive(side)
+  local r = {}
+  for _, o in ipairs(SIM.robot_orders("MXZ6", true)) do if o.side == side then r[#r + 1] = o end end
+  table.sort(r, function(x, y) return x.px < y.px end)
+  return r
+end
+-- case 1 (12:58:01): sell 245900 fills, the market jumps up (bid 245925) -> old code: counter buy 245925 (a loss)
+key(DOWN); SIM.run(0.3)
+SIM.book("MXZ6", { { 9837, 10 } }, { { 9838, 10 } })  -- the buyer lifts our 245900 and the book moves up
+SIM.trade("MXZ6", 1, 9836, 1); SIM.run(0.3)
+local c1 = mlive("B")[1]
+check(c1 and c1.px == 9835, "counter buy 245875 (own sell 245900 - 1 tick), not 245925; got " .. tostring(c1 and c1.px * 25))
+-- case 2 (12:59:28): sell 245925 fills with bid 245925 -> old code: counter buy 245925 (zero)
+mx_book(9836, 9837)
+key(DOWN); SIM.run(0.3)
+SIM.trade("MXZ6", 1, 9837, 11); SIM.run(0.3)          -- 10 ahead + ours
+local bs = mlive("B")
+check(#bs == 2 and bs[2].px == 9836, "counter buy 245900 for the 245925 sell (not 245925)")
+-- the 245925 lot's counter fills at 245900: +1 tick = +25 RUB for that pair (FIFO would book it against 245900 = 0)
+SIM.trade("MXZ6", -1, 9836, 11); SIM.run(0.3)
+check(math.abs(mx().realized - 25) < 1e-9, "pair P&L +25 RUB against its own lot, got " .. tostring(mx().realized))
+-- a counter rejected by BoC is placed again from the current book
+local rej0 = SCLP.O.st.rej_boc
+key(67); SIM.run(0.3)                                 -- cancel everything (the remaining counter too)
+mx_book(9830, 9831)
+SCLP.T.restore_tps(SIM.t); SIM.run(0.3)
+check(#mlive("B") >= 1, "counter restored for the remaining lot")
 
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))

@@ -13,7 +13,6 @@ return {
   OFFSET_TICKS = 0,            -- buy = best bid - N, sell = best ask + N (0 = join the best price, never < 0)
   QTY = 1,
   TP_TICKS = 0,                -- counter order after a fill: 0 = off, 1 = on (T toggles); distance = OFFSET
-  TP_NOT_BELOW_BE = true,      -- counter order not worse than break-even + N (G toggles)
   SKEW = false,                -- inventory skew (K toggles)
   MAX_DAY_LOSS_RUB = 3000,     -- session equity (realized + open, net of fees) <= -N -> stop (+ PANIC)
 

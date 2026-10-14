@@ -39,7 +39,7 @@ local I, B, O, M, R, T, S, W = X.I, X.B, X.O, X.M, X.R, X.T, X.S, X.W
 -- window settings (saved in sclp_settings_<ACCOUNT>.lua)
 X.st = {
   inst_text = X.cfg.DEFAULT_INSTRUMENT, offset = math.max(0, X.cfg.OFFSET_TICKS or 0), qty = X.cfg.QTY, tp = X.cfg.TP_TICKS,
-  requote = X.cfg.REQUOTE, skew = X.cfg.SKEW, tp_be = X.cfg.TP_NOT_BELOW_BE ~= false,
+  requote = X.cfg.REQUOTE, skew = X.cfg.SKEW,
   max_loss = X.cfg.MAX_DAY_LOSS_RUB, open_insts = {},
 }
 
@@ -276,10 +276,11 @@ function main()
   local errors = 0
   while X.running do
     local t = U.now()
-    local ok2, err2 = pcall(X.step, t)
+    -- traceback in the log: tells which line failed (e.g. a rare "invalid key to 'next'" seen in live QUIK)
+    local ok2, err2 = xpcall(X.step, debug and debug.traceback or tostring, t)
     if ok2 then errors = 0 else
       errors = errors + 1
-      U.log_every("steperr", 5, "STEP ERROR: " .. tostring(err2))
+      U.log_every("steperr", 5, "STEP ERROR: " .. tostring(err2):gsub("\n", " | "))
       if errors > 100 then U.alert("too many errors - stopping (orders stay, state saved)", 3); X.running = false end
     end
     sleep(X.cfg.LOOP_MS or 2)

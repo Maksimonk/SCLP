@@ -140,7 +140,12 @@ return function(X)
   ------------------------------------------------------------------
   function T.on_fill(o, q, px, t, tn)
     local inst = o.inst
-    local net, lot = X.M.on_fill(inst, o, q, px, t, { tn = tn })
+    -- a counter order closes the lot it was placed for (its P&L is that pair), the rest goes FIFO
+    local own_lot
+    if o.src == "tp" then
+      for _, l in ipairs(X.M.get(inst).lots) do if l.tp == o.tid then own_lot = l; break end end
+    end
+    local net, lot = X.M.on_fill(inst, o, q, px, t, { tn = tn, close_lot = own_lot })
     local p = X.panic
     if p and o.src == "panic" and p.left then p.left = p.left + (o.side == "B" and q or -q) end
     X.flash_fill(o.side)
@@ -180,16 +185,13 @@ return function(X)
     if not best then return skip("no best price in the book") end
     local n = math.max(0, X.st.offset or 0)          -- the same global offset as the arrow keys
     local want = (side == "S") and (best + n) or (best - n)
-    -- option G (on by default): never worse than break-even + N (position average + fees), so a market that
-    -- moved against the fill does not turn the counter order into a loss
-    if X.st.tp_be ~= false then
-      local be = X.M.breakeven(inst, side)
-      if be then
-        local gap = math.max(n, 1)                     -- at least 1 tick of profit, even with offset 0
-        if side == "S" then want = math.max(want, math.ceil(be + gap - 1e-9))
-        else want = math.min(want, math.floor(be - gap + 1e-9)) end
-      end
-    end
+    -- ALWAYS (no switch): the counter order earns at least max(offset, 1) tick against ITS OWN fill, fees included.
+    -- The market price is used only when it is better. (A switchable version once let a sell at 245900 get a
+    -- counter buy at 245925.)
+    local gap = math.max(n, 1)
+    local fee_ticks = (lot.fee_unit + X.M.fee(inst, 1, lot.px, false)) / math.max(inst.point or 1, 1e-9)
+    if side == "S" then want = math.max(want, math.ceil(lot.px + fee_ticks + gap - 1e-9))
+    else want = math.min(want, math.floor(lot.px - fee_ticks - gap + 1e-9)) end
     local cap = X.B.passive_cap(inst, side)
     if cap and ((side == "S" and want < cap) or (side == "B" and want > cap)) then want = cap end
     if not X.I.in_limits(inst, want) then return skip("price outside the exchange limits") end
@@ -280,6 +282,12 @@ return function(X)
 
   function T.on_reject(o, msg, cls)
     if o.src == "panic" then X.say("PANIC: отказ - " .. msg, "err"); return end
+    -- a counter order rejected by BoC (the market moved): the lot is uncovered - place it again on the next tick
+    -- from the then-current book (restore_tps keeps the profit floor and passivity)
+    if o.src == "tp" and (X.st.tp or 0) > 0 then
+      X.pending_tp = true
+      U.log(string.format("[%s] counter order rejected (%s) - will be placed again from the current book", o.inst.sec, cls))
+    end
     if cls == "boc" then
       X.say("Отказ биржи: заявка стала бы тейкерской (BoC) - не исполнена", "warn")
     else

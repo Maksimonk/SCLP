@@ -110,7 +110,10 @@ return function(X)
   end
 
   function S.flush(t)
-    for k, inst in pairs(dirty_inst) do dirty_inst[k] = nil; S.save_inst(inst, t) end
+    local list = {}
+    for k, inst in pairs(dirty_inst) do list[#list + 1] = inst end
+    dirty_inst = {}
+    for _, inst in ipairs(list) do S.save_inst(inst, t) end
     if dirty_settings then dirty_settings = false; S.save_settings(t) end
   end
 
@@ -119,7 +122,7 @@ return function(X)
     local sv = S.read(S.settings_path())
     if not sv then return nil end
     local today = sv.day == U.date("%Y%m%d", t)
-    for _, k in ipairs({ "inst_text", "inst_key", "offset", "qty", "tp", "requote", "skew", "tp_be", "max_loss" }) do
+    for _, k in ipairs({ "inst_text", "inst_key", "offset", "qty", "tp", "requote", "skew", "max_loss" }) do
       if sv[k] ~= nil then X.st[k] = sv[k] end
     end
     X.st.offset = math.max(0, tonumber(X.st.offset) or 0)          -- negative offsets are not allowed any more

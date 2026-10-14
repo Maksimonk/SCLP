@@ -76,16 +76,21 @@ return function(X)
     end
     local closed_net
     local left = q
-    while left > 0 and m.lots[1] and m.lots[1].sgn ~= sgn do
-      local lot = m.lots[1]
+    local function close_against(i)
+      local lot = m.lots[i]
       local c = min(left, lot.qty)
       local gross = (px - lot.px) * c * lot.sgn * (inst.point or 0)
       m.realized = m.realized + gross
       closed_net = (closed_net or 0) + gross - lot.fee_unit * c - fee * c / q
       lot.qty = lot.qty - c
       left = left - c
-      if lot.qty <= 0 then table.remove(m.lots, 1) end
+      if lot.qty <= 0 then table.remove(m.lots, i) end
     end
+    -- a counter order closes its own lot first (opt.close_lot), then FIFO
+    if opt.close_lot and opt.close_lot.sgn ~= sgn then
+      for i, l in ipairs(m.lots) do if l == opt.close_lot then close_against(i); break end end
+    end
+    while left > 0 and m.lots[1] and m.lots[1].sgn ~= sgn do close_against(1) end
     if closed_net then record_trade(m, closed_net) end
     local lot
     if left > 0 then
@@ -236,7 +241,9 @@ return function(X)
   local t_snap = 0
   function M.tick(t)
     flush_marks(t)
-    for _, m in pairs(M.by_key) do
+    local ms = {}
+    for _, m in pairs(M.by_key) do ms[#ms + 1] = m end
+    for _, m in ipairs(ms) do
       local inst = (X.inst and X.inst.key == m.key) and X.inst or nil
       if inst then
         local v = M.values(inst)
