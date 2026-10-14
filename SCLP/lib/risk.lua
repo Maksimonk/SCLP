@@ -114,10 +114,11 @@ return function(X)
       U.alert(string.format("DAILY LOSS LIMIT: equity %.2f RUB <= -%s - trading stopped", eq, tostring(X.st.max_loss)), 3)
       if X.cfg.AUTO_PANIC_ON_LOSS ~= false then X.T.panic("дневной лимит убытка", t) end
     end
-    -- entering a pause window (clearing, auction): resting quotes would face a re-priced market
+    -- entering a pause window (auction, session end): new orders are blocked; resting orders stay unless
+    -- CANCEL_ON_PAUSE = true, and even then only arrow-key orders - counters and the F close always stay
     local pw = R.pause_window(inst, t)
-    if pw and pw ~= was_pause and X.cfg.CANCEL_ON_PAUSE ~= false then
-      local n = X.T.cancel_where(function(o) return o.mode ~= "taker" end, "pause", t)
+    if pw and pw ~= was_pause and X.cfg.CANCEL_ON_PAUSE == true then
+      local n = X.T.cancel_where(function(o) return o.src == "key" end, "pause", t)
       U.log(string.format("[%s] pause window '%s': %d order(s) cancelled", inst.sec, pw, n))
       X.say("Пауза: " .. pw .. (n > 0 and (", снято заявок " .. n) or ""))
     end

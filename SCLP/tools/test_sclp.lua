@@ -650,6 +650,24 @@ SIM.trade("MXZ6", 1, 9856, 60); SIM.run(0.3)
 check(mx().pos == 0, "all four pairs closed, flat")
 check(math.abs(mx().realized - 125) < 1e-9, "4 pairs: +25 +25 +25 +50 = +125 RUB, got " .. mx().realized)
 
+------------------------------------------------------------------
+T_("TEST 24: a pause window blocks new orders but never cancels resting orders / counters")
+mx_book(9854, 9855)
+SCLP.st.tp = 1
+key(UP); SIM.run(0.3)
+SIM.trade("MXZ6", -1, 9854, 30); SIM.run(0.1)
+mx_book(9853, 9855)                                    -- counter sell rests
+local before = #mlive("S")
+check(before == 1, "counter sell resting")
+local now = SCLP.U.msk_sec(SIM.t)
+local function hhmmss(x) return string.format("%02d:%02d:%02d", math.floor(x / 3600), math.floor(x / 60) % 60, math.floor(x) % 60) end
+SCLP.cfg.PAUSE_WINDOWS = { SPBFUT = { { hhmmss(now), hhmmss(now + 60), "тест" } } }
+SIM.run(1)
+check(#mlive("S") == before, "counter still resting in the pause window")
+key(DOWN); SIM.run(0.3)
+check(#mlive("S") == before, "new orders blocked in the pause window")
+SCLP.cfg.PAUSE_WINDOWS = {}
+
 SCLP.U.close_all()
 print(string.format("\n%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

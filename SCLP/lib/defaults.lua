@@ -72,12 +72,14 @@ return {
   EXPIRY_SKIP_DAYS = 1,        -- base code -> nearest contract with more than N days left
   MAX_SPREAD_TICKS = 0,        -- no new entries if spread > N (0 = off)
   SPREAD_WIDE_K = 5,           -- ... or spread > K x its 5-minute average (and >= 3 ticks)
-  CANCEL_ON_PAUSE = true,      -- cancel resting orders when a pause window starts
-  -- MSK time windows without new orders (check the current MOEX schedule)
+  CANCEL_ON_PAUSE = false,     -- true: cancel your ARROW-KEY orders when a pause window starts (counters and the
+                               -- F close are never cancelled by a pause window)
+  -- MSK time windows without NEW orders. FORTS since 23.03.2026 (unified trading session, moex.com/s3886): no
+  -- intraday clearing, trading 07:00-23:50 without pauses, opening auction 06:50-07:00, clearing 23:50-00:30,
+  -- expirations at 14:00 / 19:00 without a halt.
   PAUSE_WINDOWS = {
-    SPBFUT = { { "13:59:30", "14:05:30", "дневной клиринг" }, { "18:44:30", "19:05:30", "вечерний клиринг" },
-               { "23:49:30", "23:59:59", "конец сессии" } },
-    SPBOPT = { { "13:59:30", "14:05:30", "дневной клиринг" }, { "18:44:30", "19:05:30", "вечерний клиринг" } },
+    SPBFUT = { { "06:49:30", "07:00:00", "аукцион открытия" }, { "23:49:30", "23:59:59", "конец сессии / клиринг" } },
+    SPBOPT = { { "06:49:30", "07:00:00", "аукцион открытия" }, { "23:49:30", "23:59:59", "конец сессии / клиринг" } },
     TQBR = { { "06:49:00", "07:00:30", "аукцион утренней сессии" }, { "09:49:00", "10:00:30", "аукцион открытия" },
              { "18:39:00", "18:50:30", "аукцион закрытия" } },
   },
